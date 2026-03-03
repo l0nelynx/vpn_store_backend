@@ -1,0 +1,16 @@
+aiofiles>=24.1.0
+aiogram>=3.21.0
+aiohttp>=3.13.3
+aiosend>=3.0.5
+aiosqlite>=0.21.0
+fastapi>=0.116.1
+uvicorn>=0.35.0
+SQLAlchemy>=2.0.41
+pydantic>=2.11.7
+pydantic-settings>=2.10.1
+python-dotenv>=1.1.1
+requests>=2.32.4
+PyYAML>=6.0.2
+orjson>=3.11.2
+magic-filter>=1.0.12
+remnawave>=2.1.13

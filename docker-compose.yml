@@ -3,7 +3,7 @@ services:
     container_name: cheezy-backend-bot
     build:
       context: .
-      dockerfile: Dockerfile_store_backend
+      dockerfile: Dockerfile
     volumes:
       - type: bind
         source: ./db/backend_db.sqlite3

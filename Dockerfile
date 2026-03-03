@@ -2,8 +2,8 @@ FROM python:3.13-alpine
 
 WORKDIR /usr/src/app
 
-COPY requirements_store_backend.txt ./
-RUN pip install --no-cache-dir -r requirements_store_backend.txt
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 RUN touch ./backend_db.sqlite3
 RUN apk add --no-cache bash
 
