@@ -1,0 +1,18 @@
+services:
+  cheezy-backend-bot:
+    container_name: cheezy-backend-bot
+    build:
+      context: .
+      dockerfile: Dockerfile_store_backend
+    volumes:
+      - type: bind
+        source: ./db/backend_db.sqlite3
+        target: /usr/src/app/backend_db.sqlite3
+      - /var/lib/marzban/certs/:/usr/src/app/uvicorn/ssl
+      - ./backend.yml:/usr/src/app/backend.yml
+      - ./dig_data.json:/usr/src/app/dig_data.json
+    ports:
+      - "5001:5001"
+    restart: unless-stopped
+    tty: true
+    stdin_open: true

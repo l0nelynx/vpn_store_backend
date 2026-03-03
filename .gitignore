@@ -1,0 +1,16 @@
+.env
+.venv
+.idea
+XRAY-VPN-BOT.iml
+venv
+uvicorn
+Deprecated
+db.sqlite3
+config.yml
+freekassa.py
+marz.py
+dig_data.json
+data.json
+support.db
+test.py
+./tests/run_sec.py
