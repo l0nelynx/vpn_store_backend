@@ -131,7 +131,7 @@ async def add_new_user_info(
                 descr=description,
                 email=email,
                 squad_id=squad_id,
-                telegram_id=userid
+                telegram_id=None
             )
 
             if buyer_nfo and buyer_nfo.get("uuid"):

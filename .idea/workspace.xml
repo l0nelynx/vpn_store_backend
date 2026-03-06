@@ -4,15 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d604ca55-1261-42bf-972c-6a195fde1a3b" name="Changes" comment="clean up">
-      <change afterPath="$PROJECT_DIR$/store/api/remnawave/squads.py" afterDir="false" />
+    <list default="true" id="d604ca55-1261-42bf-972c-6a195fde1a3b" name="Changes" comment="Remnawave migration">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements_store_backend.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements_store_backend.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/store/api/aio_ggsel.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/api/aio_ggsel.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/store/api/digiseller.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/api/digiseller.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/store/api/remnawave/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/api/remnawave/api.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/store/database/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/database/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/store/database/requests.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/database/requests.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/store/tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/tools.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -100,12 +93,21 @@
       <option name="project" value="LOCAL" />
       <updated>1772557396069</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="Remnawave migration">
+      <option name="closed" value="true" />
+      <created>1772809904187</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1772809904187</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Initial" />
     <MESSAGE value="clean up" />
-    <option name="LAST_COMMIT_MESSAGE" value="clean up" />
+    <MESSAGE value="Remnawave migration" />
+    <option name="LAST_COMMIT_MESSAGE" value="Remnawave migration" />
   </component>
 </project>
