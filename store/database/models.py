@@ -15,7 +15,17 @@ class User(Base):
     __tablename__ = 'users'
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tg_id = mapped_column(BigInteger)
+    tg_id = mapped_column(BigInteger, unique=True)
+
+    # Имя пользователя (Telegram username)
+    # Примечание: unique=True удален, так как SQLite не поддерживает добавление UNIQUE к существующей таблице
+    username: Mapped[str] = mapped_column(String(100), nullable=True)
+
+    # UUID для VLESS конфигурации
+    vless_uuid: Mapped[str] = mapped_column(String(100), nullable=True)
+
+    # API провайдер, на котором зарегистрирован пользователь (marzban/remnawave)
+    api_provider: Mapped[str] = mapped_column(String(50), default="marzban")
 
     # Добавляем отношение один-ко-многим с таблицей transactions
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
@@ -57,4 +67,3 @@ class Transaction(Base):
 async def async_main():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-

@@ -4,38 +4,50 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d604ca55-1261-42bf-972c-6a195fde1a3b" name="Changes" comment="Initial">
-      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+    <list default="true" id="d604ca55-1261-42bf-972c-6a195fde1a3b" name="Changes" comment="clean up">
+      <change afterPath="$PROJECT_DIR$/store/api/remnawave/squads.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Dockerfile_store_backend" beforeDir="false" afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/store/api/marzban/marzban.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/api/marzban/marzban.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements_store_backend.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements_store_backend.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/store/api/aio_ggsel.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/api/aio_ggsel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/store/api/digiseller.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/api/digiseller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/store/api/remnawave/api.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/api/remnawave/api.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/store/database/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/database/models.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/store_backend.py" beforeDir="false" afterPath="$PROJECT_DIR$/store_backend.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/store/database/requests.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/database/requests.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/store/tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/store/tools.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "l0nelynx"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;l0nelynx&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/l0nelynx/vpn_store_backend.git",
-    "accountId": "8c022aac-7a30-400b-b3fa-cd41efc61661"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/l0nelynx/vpn_store_backend.git&quot;,
+    &quot;accountId&quot;: &quot;8c022aac-7a30-400b-b3fa-cd41efc61661&quot;
   }
-}]]></component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 5
-}]]></component>
+}</component>
+  <component name="ProblemsViewState">
+    <option name="selectedTabId" value="ProjectErrors" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 5
+}</component>
   <component name="ProjectId" id="3ARUeCkcpHeGxroGNSlJsauSEBj" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
@@ -46,6 +58,7 @@
     "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
     "git-widget-placeholder": "master",
     "last_opened_file_path": "C:/Users/l0nelynx/vpn_store_backend"
@@ -79,11 +92,20 @@
       <option name="project" value="LOCAL" />
       <updated>1772555248739</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="clean up">
+      <option name="closed" value="true" />
+      <created>1772557396069</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1772557396069</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Initial" />
-    <option name="LAST_COMMIT_MESSAGE" value="Initial" />
+    <MESSAGE value="clean up" />
+    <option name="LAST_COMMIT_MESSAGE" value="clean up" />
   </component>
 </project>

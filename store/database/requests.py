@@ -26,6 +26,130 @@ async def get_user_by_tg_id(tg_id):
             return 200
 
 
+async def get_user_by_username(username: str):
+    """
+    Получает пользователя по Telegram username
+
+    Args:
+        username (str): Telegram username пользователя
+
+    Returns:
+        User: Объект пользователя или None
+    """
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.username == username))
+        return user
+
+
+async def create_user_with_info(tg_id: int, username: str, vless_uuid: str = None, api_provider: str = "marzban"):
+    """
+    Создает нового пользователя с полной информацией
+
+    Args:
+        tg_id (int): Telegram ID пользователя
+        username (str): Telegram username
+        vless_uuid (str): UUID для VLESS конфигурации
+        api_provider (str): Провайдер API (marzban или remnawave)
+
+    Returns:
+        User: Созданный объект пользователя
+    """
+    async with async_session() as session:
+        new_user = User(
+            tg_id=tg_id,
+            username=username,
+            vless_uuid=f"{vless_uuid}",
+            api_provider=api_provider
+        )
+        session.add(new_user)
+        await session.commit()
+        return new_user
+
+
+async def update_user_api_info(tg_id: int = 0, username: str = 0, vless_uuid: str = None, api_provider: str = None):
+    """
+    Обновляет информацию пользователя об API провайдере
+
+    Args:
+        tg_id: Telegram ID пользователя
+        username (str): Telegram username
+        vless_uuid (str): UUID для VLESS конфигурации
+        api_provider (str): Провайдер API (marzban или remnawave)
+
+    Returns:
+        bool: True если успешно, False если пользователь не найден
+    """
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.tg_id == tg_id))
+
+        if not user:
+            return False
+        if username is not None:
+            user.username = username
+        if vless_uuid is not None:
+            user.vless_uuid = f"{vless_uuid}"
+        if api_provider is not None:
+            user.api_provider = api_provider
+
+        await session.commit()
+        return True
+
+
+async def update_user_vless_uuid(tg_id: int, username: str, vless_uuid: str):
+    """
+    Обновляет UUID пользователя
+
+    Args:
+        tg_id:
+        username (str): Telegram username
+        vless_uuid (str): Новый UUID для VLESS конфигурации
+
+    Returns:
+        bool: True если успешно, False если пользователь не найден
+    """
+    return await update_user_api_info(tg_id=tg_id, username=username, vless_uuid=vless_uuid)
+
+
+async def get_user_api_provider(username: str) -> str:
+    """
+    Получает API провайдера пользователя
+
+    Args:
+        username (str): Telegram username
+
+    Returns:
+        str: Имя API провайдера (marzban/remnawave) или None
+    """
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.username == username))
+        return user.api_provider if user else None
+
+
+async def get_full_username_info(username: str) -> dict:
+    """
+    Получает полную информацию пользователя по username
+
+    Args:
+        username (str): Telegram username
+
+    Returns:
+        dict: Словарь с информацией пользователя или None
+    """
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.username == username))
+
+        if not user:
+            return None
+
+        return {
+            "id": user.id,
+            "tg_id": user.tg_id,
+            "username": user.username,
+            "vless_uuid": user.vless_uuid,
+            "api_provider": user.api_provider
+        }
+
+
 # Пример создания новой транзакции
 async def create_transaction(user_tg_id: int, user_transaction: str, username: str, days: int, uuid: str = 'None'):
     async with async_session() as session:
@@ -138,34 +262,6 @@ async def get_full_transaction_info_by_id(user_id: int):
             return 404
 
 
-async def get_full_username_info(username: str):
-
-    async with async_session() as session:
-        query = (
-            select(Transaction, User)
-            .join(User, User.id == Transaction.user_id)
-            .where(Transaction.transaction_id == username)
-        )
-
-        result = await session.execute(query)
-        row = result.first()
-
-        if row:
-            transaction, user = row
-            return {
-                "transaction_id": transaction.transaction_id,
-                "vless_uuid": transaction.vless_uuid,
-                "username": transaction.username,
-                "status": transaction.order_status,
-                "user_tg_id": user.tg_id,
-                "user_db_id": user.id,
-                "days_ordered": transaction.days_ordered
-                # Добавьте другие поля по необходимости
-            }
-        else:
-            return None
-
-
 async def update_order_status(transaction_id: str, new_status: str) -> bool:
     """
     Обновляет статус заказа по идентификатору транзакции с предварительной проверкой
@@ -189,24 +285,6 @@ async def update_order_status(transaction_id: str, new_status: str) -> bool:
 
         # Обновляем статус
         transaction.order_status = new_status
-        await session.commit()
-        return True
-
-
-async def update_user_vless_uuid(username: str, new_uuid: str) -> bool:
-
-    async with async_session() as session:
-        # Сначала проверяем существование транзакции
-        result = await session.execute(
-            select(Transaction).where(Transaction.username == username)
-        )
-        transaction = result.scalar_one_or_none()
-
-        if transaction is None:
-            return False
-
-        # Обновляем статус
-        transaction.vless_uuid = new_uuid
         await session.commit()
         return True
 
