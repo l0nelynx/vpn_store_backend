@@ -1,13 +1,52 @@
 import logging
 
 import asyncio
+import aiohttp
 
 import store.api.aio_ggsel as aio_gg
 
+from aiogram import Dispatcher, Router, F
+from aiogram.filters import Command
+from aiogram.types import Message
 from fastapi import Request, Response, HTTPException
 from store.api.digiseller import payment_async_logic
-from store.settings import run_webserver, app_uvi
+from store.settings import run_webserver, app_uvi, backend_bot, secrets
 from store.notify import webhook_tg_notify
+
+router = Router()
+
+
+@router.message(Command("message"))
+async def cmd_message(message: Message) -> None:
+    if message.from_user.id != int(secrets.get('admin_id')):
+        return
+
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        await message.reply("Использование: /message <id_i> <текст>")
+        return
+
+    try:
+        id_i = int(args[1])
+    except ValueError:
+        await message.reply("id_i должен быть числом")
+        return
+
+    text = args[2]
+
+    try:
+        async with aiohttp.ClientSession(
+            base_url=secrets.get('ggsel_base_url')
+        ) as session:
+            token = await aio_gg.get_token(session)
+            status = await aio_gg.send_message(session, id_i, text, token)
+        if status == 200:
+            await message.reply(f"Сообщение отправлено (id_i={id_i})")
+        else:
+            await message.reply(f"Ошибка отправки, статус: {status}")
+    except Exception as e:
+        await message.reply(f"Ошибка: {e}")
+
 
 @app_uvi.post("/digiseller_webhook")
 async def payment_webhook(request: Request, response: Response):
@@ -59,9 +98,12 @@ async def on_startup():
     asyncio.create_task(aio_gg.order_delivery_loop())
 
 async def main():
+    dp = Dispatcher()
+    dp.include_router(router)
     await asyncio.gather(
         run_webserver(),
         aio_gg.order_delivery_loop(),
+        dp.start_polling(backend_bot),
     )
 
 if __name__ == "__main__":
