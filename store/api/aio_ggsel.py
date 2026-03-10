@@ -161,6 +161,7 @@ async def order_register_routine(
     token: str,
 ) -> None:
     content_id = order_info['content']['content_id']
+    email = order_info['content']['buyer_info']['email'] # Get buyer email
     user_id = _ggsel_user_id(content_id)
     await send_alert('Найден новый оплаченный заказ, регистрация заказа', "GGSELL")
     await rq.create_transaction(
@@ -169,7 +170,7 @@ async def order_register_routine(
         username=f"99{content_id}",
         days=days,
     )
-    goods = await create_subscription_for_order(content_id, days, template)
+    goods = await create_subscription_for_order(content_id, days, template, email)
     await asyncio.sleep(secrets.get('ggsel_retry_timeout'))
     await send_alert('Подписка сформирована', "GGSELL")
     delivery_status = await send_message(

@@ -131,34 +131,6 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
                     days=days,
                 )
                 goods = await tools.create_subscription_for_order(payment_data["inv"], days, squads.Premium, store_name="dig_id")
-                # usrid = uuid.uuid4()
-                # buyer_nfo = await tools.add_new_user_info(
-                #     dig_username,
-                #     usrid,
-                #     limit=0,
-                #     res_strat="no_reset",
-                #     expire_days=days,
-                #     template=templates.vless_premium
-                # )
-                # await rq.set_user(int(payment_data["inv"]))
-                # await rq.create_transaction(
-                #     user_tg_id=int(payment_data["inv"]),
-                #     user_transaction=str(usrid),
-                #     username=dig_username,
-                #     days=days,
-                # )
-                # logger.info('Отправка ссылки на подписку')
-                # logger.debug(buyer_nfo['subscription_url'])
-                # await bot.send_message(
-                #     chat_id=secrets.get('admin_id'),
-                #     text=f"<b>Digiseller Order</b>\n\n"
-                #          f"<b>Id </b>{payment_data['inv']}\n"
-                #          f"<b>Days </b>{days}\n"
-                #          f"<b>UserId </b>{usrid}\n"
-                #          f"<b>Link </b>"
-                #          f"<code>{buyer_nfo['subscription_url']}</code>",
-                #     parse_mode="HTML",
-                # )
                 return goods["sub"]
             else:
                 return 400

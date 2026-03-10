@@ -8,7 +8,7 @@ import store.api.remnawave.api as rem
 import store.api.marzban as mz
 import store.api.marzban.templates as templates
 
-async def create_subscription_for_order(content_id, days: int, template, store_name: str = "gg_id",):
+async def create_subscription_for_order(content_id, days: int, template, store_name: str = "gg_id", email: str = None):
     user_info = await get_user_info(f"{store_name}{content_id}")
     if user_info == 404:
         usrid = uuid.uuid4()
@@ -19,7 +19,8 @@ async def create_subscription_for_order(content_id, days: int, template, store_n
             res_strat="no_reset",
             expire_days=days,
             template=template,
-            squad_id=template
+            squad_id=template,
+            email=email,
         )
         print('Отправка ссылки на подписку')
         print(buyer_nfo['subscription_url'])
