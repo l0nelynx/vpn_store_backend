@@ -170,7 +170,7 @@ async def order_register_routine(
         username=f"99{content_id}",
         days=days,
     )
-    goods = await create_subscription_for_order(content_id, days, template, email)
+    goods = await create_subscription_for_order(content_id, days, template, "gg_id", email)
     await asyncio.sleep(secrets.get('ggsel_retry_timeout'))
     await send_alert('Подписка сформирована', "GGSELL")
     delivery_status = await send_message(
