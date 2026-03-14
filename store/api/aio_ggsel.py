@@ -150,8 +150,8 @@ async def get_order_params(order_info: dict) -> dict:
     client_name = get_variant_info(JSON_PATH, location_param_id, location_id, 'outer_squad')  # Get location name
     days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
     hwid = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'hwid')
-    template = getattr(squads, location) # Get squad id by location name
-    outer_squad = getattr(squads, client_name) # Get outer squad id by location name
+    template = getattr(squads, location, None) if location else None
+    outer_squad = getattr(squads, client_name, None) if client_name else None
     logger.debug("Selected template: %s", template)
     return {"days": days, "template": template, "hwid": hwid, "outer_squad": outer_squad}
 
