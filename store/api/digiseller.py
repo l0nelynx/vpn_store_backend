@@ -130,7 +130,7 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
                     username=dig_username,
                     days=days,
                 )
-                goods = await tools.create_subscription_for_order(payment_data["inv"], days, squads.Premium, store_name="dig_id")
+                goods = await tools.create_subscription_for_order(payment_data["inv"], days, squads.Premium, store_name="DIG")
                 return goods["sub"]
             else:
                 return 400

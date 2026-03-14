@@ -9,15 +9,15 @@ import store.api.marzban as mz
 import store.api.marzban.templates as templates
 
 async def create_subscription_for_order(content_id, days: int, template,
-                                        store_name: str = "gg_id",
+                                        store_name: str = "GG",
                                         email: str = None,
                                         hwid: int = None,
                                         outer_squad_id: str = None):
-    user_info = await get_user_info(f"{store_name}{content_id}")
+    user_info = await get_user_info(f"{store_name}_id{content_id}")
     if user_info == 404:
         usrid = uuid.uuid4()
         buyer_nfo = await add_new_user_info(
-            f"{store_name}{content_id}",
+            f"{store_name}_id{content_id}",
             usrid,
             limit=0,
             res_strat="no_reset",
@@ -37,32 +37,12 @@ async def create_subscription_for_order(content_id, days: int, template,
                                     f"<b>Link: </b><code>{buyer_nfo['subscription_url']}</code>",
                             store_name=f"{store_name}")
         subscription_link = buyer_nfo['subscription_url']
-        # print(buyer_nfo['links'][0])
-        # print(len(buyer_nfo['links']))
-        # vless_0 = buyer_nfo['links'][0]
-        # if len(buyer_nfo['links']) > 1:
-        #     vless_1 = buyer_nfo['links'][1]
-        #     result = {"sub": subscription_link,
-        #         "vless_0": vless_0,
-        #         "vless_1": vless_1}
-        # else:
-        result = {"sub": subscription_link,
-                "vless_0": "delete-me",
-                "vless_1": "delete-me"}
+        result = {"sub": subscription_link}
         return result
     else:
         print('Пользователь уже существует')
         subscription_link = user_info['subscription_url']
-        # vless_0 = user_info['links'][0]
-        # if len(user_info['links']) > 1:
-        #     vless_1 = user_info['links'][1]
-        #     result = {"sub": subscription_link,
-        #         "vless_0": vless_0,
-        #         "vless_1": vless_1}
-        # else:
-        result = {"sub": subscription_link,
-                "vless_0": "delete-me",
-                "vless_1": "delete-me"}
+        result = {"sub": subscription_link}
         return result
 
 def time_to_unix(days: int):

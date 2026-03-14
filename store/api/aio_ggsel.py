@@ -175,7 +175,7 @@ async def order_register_routine(
         username=f"99{content_id}",
         days=days,
     )
-    goods = await create_subscription_for_order(content_id, days, template, "gg_id", email, hwid, outer_squad)
+    goods = await create_subscription_for_order(content_id, days, template, "GG", email, hwid, outer_squad)
     await asyncio.sleep(secrets.get('ggsel_retry_timeout'))
     await send_alert('Подписка сформирована', "GGSELL")
     delivery_status = await send_message(
@@ -202,7 +202,7 @@ async def order_already_registered_routine(
     email = order_info['content']['buyer_info']['email'] # Get buyer email
     user_id = _ggsel_user_id(content_id)
     if order_id_check['delivery_status'] == 0:
-        goods = await create_subscription_for_order(content_id, days, template, "gg_id", email, hwid, outer_squad)
+        goods = await create_subscription_for_order(content_id, days, template, "GG", email, hwid, outer_squad)
         delivery_status = await send_message(
             session,
             id_i=content_id,
@@ -258,10 +258,11 @@ async def check_new_orders(
 
 async def order_delivery_loop() -> None:
     async with aiohttp.ClientSession(base_url=secrets.get('ggsel_base_url')) as session:
+        error_counter = 0
         while True:
             # NOTE: error_counter сбрасывается каждую итерацию — возможный баг,
             # но оставлено как есть, чтобы не менять поведение.
-            error_counter = 0
+            # error_counter = 0
             try:
                 token = await get_token(session)
                 await check_new_orders(
@@ -279,3 +280,4 @@ async def order_delivery_loop() -> None:
                         "GGSELL",
                     )
             await asyncio.sleep(secrets.get('ggsel_check_interval') * 60)
+            error_counter = 0
