@@ -13,11 +13,11 @@ async def create_subscription_for_order(content_id, days: int, template,
                                         email: str = None,
                                         hwid: int = None,
                                         outer_squad_id: str = None):
-    user_info = await get_user_info(f"{store_name}_id{content_id}")
+    user_info = await get_user_info(f"{store_name.lower()}_id{content_id}")
     if user_info == 404:
         usrid = uuid.uuid4()
         buyer_nfo = await add_new_user_info(
-            f"{store_name}_id{content_id}",
+            f"{store_name.lower()}_id{content_id}",
             usrid,
             limit=0,
             res_strat="no_reset",
