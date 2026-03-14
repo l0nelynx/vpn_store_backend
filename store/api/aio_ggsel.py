@@ -147,10 +147,13 @@ async def get_order_params(order_info: dict) -> dict:
     location_param_id = order_info['content']['options'][index_tax ^ 1]['id']
     location_id = order_info['content']['options'][index_tax ^ 1]['user_data_id']
     location = get_variant_info(JSON_PATH, location_param_id, location_id, 'name') # Get location name
+    client_name = get_variant_info(JSON_PATH, location_param_id, location_id, 'outer_squad')  # Get location name
     days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
+    hwid = days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'hwid')
     template = getattr(squads, location) # Get squad id by location name
+    outer_squad = getattr(squads, client_name) # Get outer squad id by location name
     logger.debug("Selected template: %s", template)
-    return {"days": days, "template": template}
+    return {"days": days, "template": template, "hwid": hwid, "outer_squad": outer_squad}
 
 
 async def order_register_routine(
@@ -159,6 +162,8 @@ async def order_register_routine(
     template: str,
     session: aiohttp.ClientSession,
     token: str,
+    hwid: int = None,
+    outer_squad: str = None,
 ) -> None:
     content_id = order_info['content']['content_id']
     email = order_info['content']['buyer_info']['email'] # Get buyer email
@@ -170,7 +175,7 @@ async def order_register_routine(
         username=f"99{content_id}",
         days=days,
     )
-    goods = await create_subscription_for_order(content_id, days, template, "gg_id", email)
+    goods = await create_subscription_for_order(content_id, days, template, "gg_id", email, hwid, outer_squad)
     await asyncio.sleep(secrets.get('ggsel_retry_timeout'))
     await send_alert('Подписка сформирована', "GGSELL")
     delivery_status = await send_message(
@@ -190,11 +195,14 @@ async def order_already_registered_routine(
     template: str,
     session: aiohttp.ClientSession,
     token: str,
+    hwid: int = None,
+    outer_squad: str = None,
 ) -> None:
     content_id = order_info['content']['content_id']
+    email = order_info['content']['buyer_info']['email'] # Get buyer email
     user_id = _ggsel_user_id(content_id)
     if order_id_check['delivery_status'] == 0:
-        goods = await create_subscription_for_order(content_id, days, template)
+        goods = await create_subscription_for_order(content_id, days, template, "gg_id", email, hwid, outer_squad)
         delivery_status = await send_message(
             session,
             id_i=content_id,
@@ -232,7 +240,7 @@ async def check_new_orders(
                 logger.info("Новый заказ")
                 await order_register_routine(
                     order_info, order_params["days"],
-                    order_params["template"], session, token,
+                    order_params["template"], session, token, order_params['hwid'], order_params["outer_squad"],
                 )
             else:
                 logger.info(
@@ -241,7 +249,7 @@ async def check_new_orders(
                 )
                 await order_already_registered_routine(
                     order_id_check, order_info, order_params["days"],
-                    order_params["template"], session, token,
+                    order_params["template"], session, token, order_params['hwid'], order_params["outer_squad"],
                 )
         else:
             logger.info("Заказ оплачен либо отменен: %s", sale['invoice_id'])

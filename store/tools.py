@@ -8,7 +8,11 @@ import store.api.remnawave.api as rem
 import store.api.marzban as mz
 import store.api.marzban.templates as templates
 
-async def create_subscription_for_order(content_id, days: int, template, store_name: str = "gg_id", email: str = None):
+async def create_subscription_for_order(content_id, days: int, template,
+                                        store_name: str = "gg_id",
+                                        email: str = None,
+                                        hwid: int = None,
+                                        outer_squad_id: str = None):
     user_info = await get_user_info(f"{store_name}{content_id}")
     if user_info == 404:
         usrid = uuid.uuid4()
@@ -21,6 +25,8 @@ async def create_subscription_for_order(content_id, days: int, template, store_n
             template=template,
             squad_id=template,
             email=email,
+            hwid=hwid,
+            outer_squad_id=outer_squad_id
         )
         print('Отправка ссылки на подписку')
         print(buyer_nfo['subscription_url'])
@@ -72,7 +78,9 @@ async def add_new_user_info(
     api: str = "remnawave",
     email: str = None,
     description: str = "created by backend v2",
-    squad_id: str = secrets.get('rw_free_id')
+    squad_id: str = secrets.get('rw_free_id'),
+    hwid: int = None,
+    outer_squad_id: str = None,
 ):
     """
     Добавляет нового пользователя в указанный API провайдер
@@ -88,6 +96,8 @@ async def add_new_user_info(
         email (str): Email пользователя (для RemnaWave)
         description (str): Описание пользователя
         squad_id (str): ID группы пользователей в RemnaWave
+        hwid (int): Лимит устройств по HWID для RemnaWave (None = лимит по умолчанию, 0 = без лимита)
+        outer_squad_id (str): UUID внешней группы для страницы подписки в RemnaWave (опционально)
 
     Returns:
         dict: Информация о созданном пользователе
@@ -132,7 +142,9 @@ async def add_new_user_info(
                 descr=description,
                 email=email,
                 squad_id=squad_id,
-                telegram_id=None
+                telegram_id=None,
+                hwid_device_limit=hwid,
+                external_squad_uuid=outer_squad_id
             )
 
             if buyer_nfo and buyer_nfo.get("uuid"):

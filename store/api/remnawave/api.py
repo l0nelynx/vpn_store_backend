@@ -68,7 +68,9 @@ async def create_user(
     email: str = None,
     telegram_id: int = None,
     tag: str = None,
-    squad_id: str = None
+    squad_id: str = None,
+    hwid_device_limit: int = None,
+    external_squad_uuid: str = None
 ):
     """
     Создает нового пользователя в RemnaWave с расширенными параметрами
@@ -82,6 +84,8 @@ async def create_user(
         telegram_id (int): Telegram ID пользователя
         tag (str): Тег для категоризации пользователей
         squad_id (str): ID группы пользователей (по умолчанию default squad)
+        hwid_device_limit (int): Лимит устройств по HWID (None = лимит по умолчанию, 0 = без лимита)
+        external_squad_uuid (str): UUID внешней группы для страницы подписки (опционально)
 
     Returns:
         dict: Словарь с информацией о созданном пользователе
@@ -104,6 +108,8 @@ async def create_user(
             email=email,
             active_internal_squads=[squad_id] if squad_id else [f"{secrets.get('rw_free_id')}"],
             telegram_id=telegram_id,
+            hwid_device_limit=hwid_device_limit,
+            external_squad_uuid=external_squad_uuid
         )
 
         # Добавляем опциональные параметры если они предоставлены
