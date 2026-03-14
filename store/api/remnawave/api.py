@@ -15,10 +15,22 @@ from remnawave.models import (  # Updated import path
     CreateInternalSquadRequestDto
 )
 
+_sdk_instance: RemnawaveSDK | None = None
+
+
+def get_sdk() -> RemnawaveSDK:
+    global _sdk_instance
+    if _sdk_instance is None:
+        _sdk_instance = RemnawaveSDK(
+            base_url=secrets.get('remnawave_url'),
+            token=secrets.get('remnawave_token'),
+        )
+    return _sdk_instance
+
 
 async def get_all_users():
     """Получает список всех пользователей из RemnaWave"""
-    remnawave = RemnawaveSDK(base_url=secrets.get('remnawave_url'), token=secrets.get('remnawave_token'))
+    remnawave = get_sdk()
     # Fetch all users
     response: UsersResponseDto = await remnawave.users.get_all_users_v2()
     total_users: int = response.total
@@ -38,7 +50,7 @@ async def get_user_from_username(username: str):
         dict: Словарь с информацией о пользователе или None
     """
     try:
-        remnawave = RemnawaveSDK(base_url=secrets.get('remnawave_url'), token=secrets.get('remnawave_token'))
+        remnawave = get_sdk()
         response: UserResponseDto = await remnawave.users.get_user_by_username(username)
 
         if not response:
@@ -91,7 +103,7 @@ async def create_user(
         dict: Словарь с информацией о созданном пользователе
     """
     try:
-        remnawave = RemnawaveSDK(base_url=secrets.get('remnawave_url'), token=secrets.get('remnawave_token'))
+        remnawave = get_sdk()
 
         if email is None:
             email = f"{username}@bot.local"
@@ -165,7 +177,7 @@ async def update_user(
         dict: Словарь с обновленной информацией о пользователе
     """
     try:
-        remnawave = RemnawaveSDK(base_url=secrets.get('remnawave_url'), token=secrets.get('remnawave_token'))
+        remnawave = get_sdk()
 
         update_data = {
             "uuid": uuid.UUID(user_uuid),
@@ -214,7 +226,7 @@ async def delete_user(user_uuid: str) -> bool:
         bool: True если успешно, False если ошибка
     """
     try:
-        remnawave = RemnawaveSDK(base_url=secrets.get('remnawave_url'), token=secrets.get('remnawave_token'))
+        remnawave = get_sdk()
         await remnawave.users.delete_user(user_uuid)
         return True
     except Exception as e:
@@ -232,7 +244,7 @@ async def get_user_subscription_link(user_uuid: str) -> str:
         str: Ссылка на подписку или None
     """
     try:
-        remnawave = RemnawaveSDK(base_url=secrets.get('remnawave_url'), token=secrets.get('remnawave_token'))
+        remnawave = get_sdk()
         response: UserResponseDto = await remnawave.users.get_user_by_uuid(user_uuid)
         return response.subscription_url if response else None
     except Exception as e:

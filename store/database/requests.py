@@ -1,16 +1,28 @@
+from contextlib import asynccontextmanager
+
 from sqlalchemy import select, update
+from sqlalchemy.orm import selectinload
 
 from store.database.models import User, Transaction
 from store.database.models import async_session
 
 
-async def set_user(tg_id):
-    async with async_session() as session:
-        user = await session.scalar(select(User).where(User.tg_id == tg_id))
+@asynccontextmanager
+async def get_session(existing_session=None):
+    if existing_session is not None:
+        yield existing_session
+    else:
+        async with async_session() as session:
+            yield session
+
+
+async def set_user(tg_id, session=None):
+    async with get_session(session) as s:
+        user = await s.scalar(select(User).where(User.tg_id == tg_id))
 
         if not user:
-            session.add(User(tg_id=tg_id))
-            await session.commit()
+            s.add(User(tg_id=tg_id))
+            await s.commit()
 
 
 async def get_users():
@@ -66,21 +78,9 @@ async def create_user_with_info(tg_id: int, username: str, vless_uuid: str = Non
         return new_user
 
 
-async def update_user_api_info(tg_id: int = 0, username: str = 0, vless_uuid: str = None, api_provider: str = None):
-    """
-    Обновляет информацию пользователя об API провайдере
-
-    Args:
-        tg_id: Telegram ID пользователя
-        username (str): Telegram username
-        vless_uuid (str): UUID для VLESS конфигурации
-        api_provider (str): Провайдер API (marzban или remnawave)
-
-    Returns:
-        bool: True если успешно, False если пользователь не найден
-    """
-    async with async_session() as session:
-        user = await session.scalar(select(User).where(User.tg_id == tg_id))
+async def update_user_api_info(tg_id: int = 0, username: str = 0, vless_uuid: str = None, api_provider: str = None, session=None):
+    async with get_session(session) as s:
+        user = await s.scalar(select(User).where(User.tg_id == tg_id))
 
         if not user:
             return False
@@ -91,7 +91,7 @@ async def update_user_api_info(tg_id: int = 0, username: str = 0, vless_uuid: st
         if api_provider is not None:
             user.api_provider = api_provider
 
-        await session.commit()
+        await s.commit()
         return True
 
 
@@ -150,63 +150,51 @@ async def get_full_username_info(username: str) -> dict:
         }
 
 
-# Пример создания новой транзакции
-async def create_transaction(user_tg_id: int, user_transaction: str, username: str, days: int, uuid: str = 'None'):
-    async with async_session() as session:
-        # Находим пользователя по tg_id
-        user = await session.scalar(
+async def create_transaction(user_tg_id: int, user_transaction: str, username: str, days: int, uuid: str = 'None', session=None):
+    async with get_session(session) as s:
+        user = await s.scalar(
             select(User).where(User.tg_id == user_tg_id)
         )
 
         if user:
-            # Создаем новую транзакцию
             new_transaction = Transaction(
                 transaction_id=user_transaction,
-                vless_uuid = uuid,
+                vless_uuid=uuid,
                 username=username,
                 order_status='created',
                 delivery_status=0,
                 days_ordered=days,
-                user_id=user.id  # Используем id пользователя из таблицы users
+                user_id=user.id
             )
 
-            session.add(new_transaction)
-            await session.commit()
+            s.add(new_transaction)
+            await s.commit()
             return new_transaction
         return None
 
 
-# Пример получения всех транзакций пользователя
 async def get_user_transactions(user_tg_id: int):
     async with async_session() as session:
         user = await session.scalar(
-            select(User).where(User.tg_id == user_tg_id)
+            select(User)
+            .options(selectinload(User.transactions))
+            .where(User.tg_id == user_tg_id)
         )
 
         if user:
-            # Благодаря отношениям мы можем получить все транзакции пользователя
             return user.transactions
         return []
 
 
-async def get_full_transaction_info(transaction_id: str):
-    """
-    Получает полную информацию о транзакции и связанном пользователе
-
-    Args:
-        transaction_id (str): Идентификатор транзакции
-
-    Returns:
-        dict: Словарь с информацией о транзакции и пользователе или None
-    """
-    async with async_session() as session:
+async def get_full_transaction_info(transaction_id: str, session=None):
+    async with get_session(session) as s:
         query = (
             select(Transaction, User)
             .join(User, User.id == Transaction.user_id)
             .where(Transaction.transaction_id == transaction_id)
         )
 
-        result = await session.execute(query)
+        result = await s.execute(query)
         row = result.first()
 
         if row:
@@ -219,7 +207,6 @@ async def get_full_transaction_info(transaction_id: str):
                 "user_tg_id": user.tg_id,
                 "user_db_id": user.id,
                 "days_ordered": transaction.days_ordered
-                # Добавьте другие поля по необходимости
             }
         else:
             return None

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 from typing import Any, Optional
@@ -8,7 +9,6 @@ from uuid import UUID
 import store.api.remnawave.squads as squads
 
 import store.tools as tools
-import store.api.marzban.templates as templates
 from pydantic import BaseModel
 from store.settings import backend_bot as bot
 
@@ -23,6 +23,24 @@ file_path = "dig_data.json"
 config_path = Path(__file__).parent.parent.parent / file_path
 
 JSON_PATH = config_path
+
+_json_cache_data: dict | None = None
+_json_cache_mtime: float = 0.0
+
+
+def _load_json_cached(json_file_path: Path) -> dict | None:
+    global _json_cache_data, _json_cache_mtime
+    try:
+        mtime = os.path.getmtime(json_file_path)
+        if _json_cache_data is not None and mtime == _json_cache_mtime:
+            return _json_cache_data
+        with open(json_file_path, 'r') as stream:
+            _json_cache_data = json.load(stream)
+        _json_cache_mtime = mtime
+        return _json_cache_data
+    except Exception as e:
+        logger.debug(f"Error loading JSON cache: {e}")
+        return None
 
 
 class DigisellerResponse(BaseModel):
@@ -64,8 +82,9 @@ def get_variant_info(
     field: Optional[str] = None,
 ) -> Optional[Any]:
     try:
-        with open(json_file_path, 'r') as stream:
-            data = json.load(stream)
+        data = _load_json_cached(json_file_path)
+        if data is None:
+            return None
 
         variant_id_str = str(variant_id)
         variant_info = data['var_ids'][f'{merchant_id}']['variants'].get(variant_id_str)
@@ -101,38 +120,39 @@ def check_id_exists_efficient(target_id: Any, secrets_in: Any) -> bool:
 
 async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
     logger.info(f"Получен вебхук от магазина: {payment_data}")
-    # Проверяем обязательные поля
     if 'id' not in payment_data or 'inv' not in payment_data or 'options' not in payment_data:
         return 400
     if check_id_exists_efficient(payment_data['id'], secrets):
         logger.info('Id магазина обнаружен')
         dig_username = "dig_id" + payment_data["inv"]
-        order_id_check = await rq.get_full_transaction_info(payment_data["inv"])
-        user_info = await tools.get_user_info(dig_username)
-        if user_info == 404:
-            logger.info('Регистрация новой транзакции')
-            merchant_id = payment_data['options'][0]['id']
-            tariff_id = payment_data['options'][0]['user_data']
-            days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
-            sign = generate_signature(
-                payment_data['id'],
-                payment_data['inv'],
-                secrets.get('dig_pass'),
-            )
-            logger.debug(f"Computed sign: {sign}")
-            logger.debug(f"Received sign: {payment_data.get('sign')}")
-            if payment_data.get('sign') == sign:
-                logger.info('Подпись подтверждена')
-                await rq.set_user(int(f"44{payment_data["inv"]}"))
-                await rq.create_transaction(
-                    user_tg_id=int(f"44{payment_data["inv"]}"),
-                    user_transaction=str(uuid.uuid4()),
-                    username=dig_username,
-                    days=days,
+        async with rq.get_session() as session:
+            order_id_check = await rq.get_full_transaction_info(payment_data["inv"], session=session)
+            user_info = await tools.get_user_info(dig_username)
+            if user_info == 404:
+                logger.info('Регистрация новой транзакции')
+                merchant_id = payment_data['options'][0]['id']
+                tariff_id = payment_data['options'][0]['user_data']
+                days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
+                sign = generate_signature(
+                    payment_data['id'],
+                    payment_data['inv'],
+                    secrets.get('dig_pass'),
                 )
-                goods = await tools.create_subscription_for_order(payment_data["inv"], days, squads.Premium, store_name="DIG")
-                return goods["sub"]
+                logger.debug(f"Computed sign: {sign}")
+                logger.debug(f"Received sign: {payment_data.get('sign')}")
+                if payment_data.get('sign') == sign:
+                    logger.info('Подпись подтверждена')
+                    await rq.set_user(int(f"44{payment_data['inv']}"), session=session)
+                    await rq.create_transaction(
+                        user_tg_id=int(f"44{payment_data['inv']}"),
+                        user_transaction=str(uuid.uuid4()),
+                        username=dig_username,
+                        days=days,
+                        session=session,
+                    )
+                    goods = await tools.create_subscription_for_order(payment_data["inv"], days, squads.Premium, store_name="DIG", user_info=user_info)
+                    return goods["sub"]
+                else:
+                    return 400
             else:
-                return 400
-        else:
-            return user_info['subscription_url']
+                return user_info['subscription_url']

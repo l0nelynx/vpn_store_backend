@@ -1,8 +1,23 @@
-from sqlalchemy import BigInteger, String, ForeignKey, Index, Integer
+from sqlalchemy import BigInteger, String, ForeignKey, Index, Integer, event
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-engine = create_async_engine(url='sqlite+aiosqlite:///backend_db.sqlite3')
+engine = create_async_engine(
+    url='sqlite+aiosqlite:///backend_db.sqlite3',
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.close()
+
 
 async_session = async_sessionmaker(engine)
 
@@ -29,6 +44,10 @@ class User(Base):
 
     # Добавляем отношение один-ко-многим с таблицей transactions
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="user")
+
+    __table_args__ = (
+        Index('ix_user_username', 'username'),
+    )
 
 
 class Transaction(Base):

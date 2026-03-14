@@ -6,7 +6,6 @@ import time
 import hashlib
 import uuid
 
-import store.api.marzban.templates as templates
 import store.api.remnawave.squads as squads
 from store.settings import secrets
 from store.api.digiseller import get_variant_info, JSON_PATH
@@ -63,8 +62,8 @@ async def send_message(
     message: str,
     token: str,
 ) -> int:
-    success_counter = 0
-    while success_counter <= secrets.get('ggsel_request_retries'):
+    retries = secrets.get('ggsel_request_retries')
+    for attempt in range(retries + 1):
         payload = {
             "message": message,
         }
@@ -89,14 +88,14 @@ async def send_message(
                 await send_alert(
                     f"Ошибка отправки товара:\n"
                     f"[{status}]:{data.decode('utf-8')}\n"
-                    f"Попытка: {success_counter}/"
-                    f"{secrets.get('ggsel_request_retries')}\n"
+                    f"Попытка: {attempt + 1}/"
+                    f"{retries + 1}\n"
                     f"Повтор через {secrets.get('ggsel_retry_timeout')} секунд",
                     "GGSELL",
                 )
-                success_counter += 1
-                await asyncio.sleep(secrets.get('ggsel_retry_timeout'))
-                return 400
+                if attempt < retries:
+                    await asyncio.sleep(secrets.get('ggsel_retry_timeout'))
+    return 400
 
 
 async def return_last_sales(
@@ -176,7 +175,6 @@ async def order_register_routine(
         days=days,
     )
     goods = await create_subscription_for_order(content_id, days, template, "GG", email, hwid, outer_squad)
-    await asyncio.sleep(secrets.get('ggsel_retry_timeout'))
     await send_alert('Подписка сформирована', "GGSELL")
     delivery_status = await send_message(
         session,
@@ -224,33 +222,34 @@ async def check_new_orders(
     for sale in last_sales['sales']:
         order_info = await get_order_info(session, sale['invoice_id'], token=token)
         content_id = order_info['content']['content_id']
-        if order_info['content']['invoice_state'] >= 3 <= 4:
-            await rq.set_user(_ggsel_user_id(content_id))
-            logger.info(
-                "Оплаченный заказ #%s\ninv_id: %s\noption id: %s",
-                content_id,
-                sale['invoice_id'],
-                order_info['content']['options'][0]['user_data_id'],
-            )
-            order_id_check = await rq.get_full_transaction_info_by_id(
-                _ggsel_user_id(content_id),
-            )
-            order_params = await get_order_params(order_info)
-            if order_id_check == 404:
-                logger.info("Новый заказ")
-                await order_register_routine(
-                    order_info, order_params["days"],
-                    order_params["template"], session, token, order_params['hwid'], order_params["outer_squad"],
-                )
-            else:
+        if 3 <= order_info['content']['invoice_state'] <= 4:
+            async with rq.get_session() as db_session:
+                await rq.set_user(_ggsel_user_id(content_id), session=db_session)
                 logger.info(
-                    "Заказ уже зарегистрирован в базе, delivery_status: %s",
-                    order_id_check['delivery_status'],
+                    "Оплаченный заказ #%s\ninv_id: %s\noption id: %s",
+                    content_id,
+                    sale['invoice_id'],
+                    order_info['content']['options'][0]['user_data_id'],
                 )
-                await order_already_registered_routine(
-                    order_id_check, order_info, order_params["days"],
-                    order_params["template"], session, token, order_params['hwid'], order_params["outer_squad"],
+                order_id_check = await rq.get_full_transaction_info_by_id(
+                    _ggsel_user_id(content_id),
                 )
+                order_params = await get_order_params(order_info)
+                if order_id_check == 404:
+                    logger.info("Новый заказ")
+                    await order_register_routine(
+                        order_info, order_params["days"],
+                        order_params["template"], session, token, order_params['hwid'], order_params["outer_squad"],
+                    )
+                else:
+                    logger.info(
+                        "Заказ уже зарегистрирован в базе, delivery_status: %s",
+                        order_id_check['delivery_status'],
+                    )
+                    await order_already_registered_routine(
+                        order_id_check, order_info, order_params["days"],
+                        order_params["template"], session, token, order_params['hwid'], order_params["outer_squad"],
+                    )
         else:
             logger.info("Заказ оплачен либо отменен: %s", sale['invoice_id'])
             await rq.set_user(_ggsel_user_id(content_id))

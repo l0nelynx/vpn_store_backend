@@ -74,7 +74,7 @@ async def payment_webhook(request: Request, response: Response):
         )
 
 @app_uvi.post("/ggsel_webhook_new")
-async def payment_webhook(request: Request, response: Response):
+async def ggsel_payment_webhook(request: Request, response: Response):
     try:
         payment_data = await request.json()
         print(payment_data)
@@ -92,11 +92,6 @@ async def payment_webhook(request: Request, response: Response):
             }
         )
 
-async def on_startup():
-    """Действия при запуске бота"""
-    asyncio.create_task(run_webserver())  # Запуск Uvicorn в фоне
-    asyncio.create_task(aio_gg.order_delivery_loop())
-
 async def main():
     dp = Dispatcher()
     dp.include_router(router)
@@ -107,8 +102,8 @@ async def main():
     )
 
 if __name__ == "__main__":
-    asyncio.run(main())
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
+    asyncio.run(main())
