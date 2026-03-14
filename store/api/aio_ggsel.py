@@ -150,10 +150,6 @@ async def get_order_params(order_info: dict) -> dict:
     client_name = get_variant_info(JSON_PATH, location_param_id, location_id, 'outer_squad')  # Get location name
     days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
     hwid = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'hwid')
-    if location is None:
-        raise ValueError(f"Location not found for param_id={location_param_id}, id={location_id}")
-    if client_name is None:
-        raise ValueError(f"Client name (outer_squad) not found for param_id={location_param_id}, id={location_id}")
     template = getattr(squads, location) # Get squad id by location name
     outer_squad = getattr(squads, client_name) # Get outer squad id by location name
     logger.debug("Selected template: %s", template)
