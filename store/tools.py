@@ -30,11 +30,13 @@ async def create_subscription_for_order(content_id, days: int, template,
         )
         print('Отправка ссылки на подписку')
         print(buyer_nfo['subscription_url'])
-        await send_tg_alert(message=f"<b>GGsel Order</b>\n\n"
-                                    f"<b>GGsel Id: </b><code>{content_id}</code>\n"
-                                    f"<b>Days: </b>{days}\n"
-                                    f"<b>Vless uuid: </b>{usrid}\n"
-                                    f"<b>Link: </b><code>{buyer_nfo['subscription_url']}</code>",
+        await send_tg_alert(message=f"<b>⚠️ New {store_name} Order</b>\n"
+                                    f"<b>🎫 OrderId: </b><code>{content_id}</code>\n"
+                                    f"<b>👤 Email: </b><code>{email if email is not None else 'None'}</code>\n"
+                                    f"<b>📱 HWID Limit: </b><code>{hwid if hwid is not None else 'default'}</code>\n"
+                                    f"<b>📆 Days: </b>{days}\n"
+                                    f"<b>💻 Vless uuid: </b><code>{usrid}</code>\n"
+                                    f"<b>🔗 Link: </b><code>{buyer_nfo['subscription_url']}</code>",
                             store_name=f"{store_name}")
         subscription_link = buyer_nfo['subscription_url']
         result = {"sub": subscription_link}
