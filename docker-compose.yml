@@ -1,6 +1,6 @@
 services:
-  cheezy-backend-bot:
-    container_name: cheezy-backend-bot
+  backend-bot:
+    container_name: backend-bot
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,8 +11,15 @@ services:
       - /var/lib/marzban/certs/:/usr/src/app/uvicorn/ssl
       - ./backend.yml:/usr/src/app/backend.yml
       - ./dig_data.json:/usr/src/app/dig_data.json
-    ports:
-      - "5001:5001"
+#    ports:
+#      - "5001:5001"
+    networks:
+      - backend-network
     restart: unless-stopped
     tty: true
     stdin_open: true
+networks:
+  backend-network:
+    name: backend-network
+    driver: bridge
+    external: false
