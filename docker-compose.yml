@@ -11,8 +11,8 @@ services:
       - /var/lib/marzban/certs/:/usr/src/app/uvicorn/ssl
       - ./backend.yml:/usr/src/app/backend.yml
       - ./dig_data.json:/usr/src/app/dig_data.json
-#    ports:
-#      - "5001:5001"
+    ports:
+       - '127.0.0.1:5001:5001'
     networks:
       - backend-network
     restart: unless-stopped
