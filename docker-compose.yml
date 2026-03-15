@@ -22,4 +22,4 @@ networks:
   backend-network:
     name: backend-network
     driver: bridge
-    external: false
+    external: true
