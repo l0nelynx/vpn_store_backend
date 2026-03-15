@@ -48,7 +48,7 @@ async def cmd_message(message: Message) -> None:
         await message.reply(f"Ошибка: {e}")
 
 
-@app_uvi.post("/digiseller_webhook")
+@app_uvi.post("/store/digiseller_webhook")
 async def payment_webhook(request: Request, response: Response):
     try:
         payment_data = await request.json()
@@ -73,7 +73,7 @@ async def payment_webhook(request: Request, response: Response):
             }
         )
 
-@app_uvi.post("/ggsel_webhook_new")
+@app_uvi.post("/store/ggsel_webhook_new")
 async def ggsel_payment_webhook(request: Request, response: Response):
     try:
         payment_data = await request.json()
