@@ -6,8 +6,8 @@ services:
       dockerfile: Dockerfile
     volumes:
       - type: bind
-        source: ./db/backend_db.sqlite3
-        target: /usr/src/app/backend_db.sqlite3
+        source: ./db
+        target: /usr/src/app/db
       - /var/lib/marzban/certs/:/usr/src/app/uvicorn/ssl
       - ./backend.yml:/usr/src/app/backend.yml
       - ./dig_data.json:/usr/src/app/dig_data.json

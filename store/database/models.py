@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 engine = create_async_engine(
-    url='sqlite+aiosqlite:///backend_db.sqlite3',
+    url='sqlite+aiosqlite:///db/backend_db.sqlite3',
     pool_size=5,
     max_overflow=10,
     pool_pre_ping=True,
