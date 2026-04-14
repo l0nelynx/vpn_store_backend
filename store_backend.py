@@ -96,6 +96,9 @@ async def ggsel_payment_webhook(request: Request, response: Response):
         )
 
 async def main():
+    from store.database.models import async_main as db_init
+    await db_init()
+
     dp = Dispatcher()
     dp.include_router(router)
     await asyncio.gather(
