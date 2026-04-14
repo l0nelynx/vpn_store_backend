@@ -83,6 +83,21 @@ class Transaction(Base):
     )
 
 
+class OrderParam(Base):
+    __tablename__ = 'order_params'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(Integer)
+    param_id: Mapped[int] = mapped_column(Integer)
+    user_data_id: Mapped[int] = mapped_column(Integer)
+    type: Mapped[str] = mapped_column(String(50))
+    data: Mapped[str] = mapped_column(String(500))
+
+    __table_args__ = (
+        Index('ix_order_params_lookup', 'item_id', 'param_id', 'user_data_id'),
+    )
+
+
 async def async_main():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

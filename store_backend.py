@@ -10,8 +10,11 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from fastapi import Request, Response, HTTPException
 from store.api.digiseller import payment_async_logic
+from store.api.order_params_router import order_params_router
 from store.settings import run_webserver, app_uvi, backend_bot, secrets
 from store.notify import webhook_tg_notify
+
+app_uvi.include_router(order_params_router)
 
 router = Router()
 

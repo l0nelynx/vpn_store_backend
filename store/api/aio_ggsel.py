@@ -6,9 +6,7 @@ import time
 import hashlib
 import uuid
 
-import store.api.remnawave.squads as squads
 from store.settings import secrets
-from store.api.digiseller import get_variant_info, JSON_PATH
 import store.database.requests as rq
 from store.notify import send_tg_alert as send_alert
 from store.tools import create_subscription_for_order
@@ -139,20 +137,24 @@ async def get_order_info(
 
 
 async def get_order_params(order_info: dict) -> dict:
-    index_tax = int(not order_info['content']['options'][0]['name'] == 'Тариф')
-    merchant_id = order_info['content']['options'][index_tax]['id']
-    tariff_id = order_info['content']['options'][index_tax]['user_data_id']
-    logger.debug("Options length: %d", len(order_info['content']['options']))
-    location_param_id = order_info['content']['options'][index_tax ^ 1]['id']
-    location_id = order_info['content']['options'][index_tax ^ 1]['user_data_id']
-    location = get_variant_info(JSON_PATH, location_param_id, location_id, 'name') # Get location name
-    client_name = get_variant_info(JSON_PATH, location_param_id, location_id, 'outer_squad')  # Get location name
-    days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
-    hwid = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'hwid')
-    template = getattr(squads, location, None) if location else None
-    outer_squad = getattr(squads, client_name, None) if client_name else None
-    logger.debug("Selected template: %s", template)
-    return {"days": days, "template": template, "hwid": hwid, "outer_squad": outer_squad}
+    item_id = order_info['content']['item_id']
+    result = {}
+    for option in order_info['content']['options']:
+        params = await rq.get_order_params_dict(
+            item_id=item_id,
+            param_id=option['id'],
+            user_data_id=option['user_data_id'],
+        )
+        result.update(params)
+    days = result.get('days')
+    hwid = result.get('hwid')
+    logger.debug("Order params from DB: %s", result)
+    return {
+        "days": int(days) if days is not None else None,
+        "template": result.get('location'),
+        "hwid": int(hwid) if hwid is not None else None,
+        "outer_squad": result.get('external_sq'),
+    }
 
 
 async def order_register_routine(

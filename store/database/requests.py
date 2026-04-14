@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
-from store.database.models import User, Transaction
+from store.database.models import User, Transaction, OrderParam
 from store.database.models import async_session
 
 
@@ -294,3 +294,68 @@ async def update_delivery_status(tg_id: int, new_delivery_status: int):
             print(f"Updated delivery_status to {new_delivery_status} for user {tg_id}")
         else:
             print(f"User with tg_id {tg_id} not found")
+
+
+async def create_order_param(item_id: int, param_id: int, user_data_id: int, type_: str, data: str):
+    async with async_session() as session:
+        session.add(OrderParam(
+            item_id=item_id,
+            param_id=param_id,
+            user_data_id=user_data_id,
+            type=type_,
+            data=data,
+        ))
+        await session.commit()
+
+
+async def get_order_params_dict(item_id: int, param_id: int, user_data_id: int) -> dict[str, str]:
+    async with async_session() as session:
+        result = await session.scalars(
+            select(OrderParam).where(
+                OrderParam.item_id == item_id,
+                OrderParam.param_id == param_id,
+                OrderParam.user_data_id == user_data_id,
+            )
+        )
+        return {row.type: row.data for row in result}
+
+
+async def get_all_order_params(item_id: int | None = None) -> list[dict]:
+    async with async_session() as session:
+        stmt = select(OrderParam)
+        if item_id is not None:
+            stmt = stmt.where(OrderParam.item_id == item_id)
+        result = await session.scalars(stmt)
+        return [
+            {
+                "id": row.id,
+                "item_id": row.item_id,
+                "param_id": row.param_id,
+                "user_data_id": row.user_data_id,
+                "type": row.type,
+                "data": row.data,
+            }
+            for row in result
+        ]
+
+
+async def update_order_param(record_id: int, **kwargs) -> bool:
+    async with async_session() as session:
+        param = await session.get(OrderParam, record_id)
+        if param is None:
+            return False
+        for key, value in kwargs.items():
+            if hasattr(param, key):
+                setattr(param, key, value)
+        await session.commit()
+        return True
+
+
+async def delete_order_param(record_id: int) -> bool:
+    async with async_session() as session:
+        param = await session.get(OrderParam, record_id)
+        if param is None:
+            return False
+        await session.delete(param)
+        await session.commit()
+        return True
