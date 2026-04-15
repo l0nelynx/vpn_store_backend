@@ -132,7 +132,7 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
                 logger.info('Регистрация новой транзакции')
                 merchant_id = payment_data['options'][0]['id']
                 tariff_id = payment_data['options'][0]['user_data']
-                days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
+                # days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
                 sign = generate_signature(
                     payment_data['id'],
                     payment_data['inv'],
@@ -142,6 +142,20 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
                 logger.debug(f"Received sign: {payment_data.get('sign')}")
                 if payment_data.get('sign') == sign:
                     logger.info('Подпись подтверждена')
+                    item_id = payment_data['id']
+                    result = {}
+                    for option in payment_data['options']:
+                        params = await rq.get_order_params_dict(
+                            item_id=item_id,
+                            param_id=option['id'],
+                            user_data_id=option['user_data'],
+                        )
+                        result.update(params)
+                    days = result.get('days')
+                    hwid = result.get('hwid')
+                    external_sq=result.get('external_sq')
+                    internal_sq=result.get('location')
+                    logger.debug("Order params from DB: %s", result)
                     await rq.set_user(int(f"44{payment_data['inv']}"), session=session)
                     await rq.create_transaction(
                         user_tg_id=int(f"44{payment_data['inv']}"),
@@ -150,7 +164,14 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
                         days=days,
                         session=session,
                     )
-                    goods = await tools.create_subscription_for_order(payment_data["inv"], days, squads.Premium, store_name="DIG", user_info=user_info)
+                    goods = await tools.create_subscription_for_order(content_id=payment_data["inv"],
+                                                                      days=days,
+                                                                      email=f"{payment_data['inv']}@cheeze.com",
+                                                                      template=internal_sq,
+                                                                      outer_squad_id=external_sq,
+                                                                      hwid=hwid,
+                                                                      store_name="DIG",
+                                                                      user_info=user_info)
                     return goods["sub"]
                 else:
                     return 400
