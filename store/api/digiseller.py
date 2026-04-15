@@ -41,51 +41,53 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
     logger.info(f"Получен вебхук от магазина: {payment_data}")
     if 'id' not in payment_data or 'inv' not in payment_data or 'options' not in payment_data:
         return 400
-    if await rq.item_id_exists(int(payment_data['id'])):
+    async with rq.get_session() as session:
+        if not await rq.item_id_exists(int(payment_data['id']), session=session):
+            return 400
         logger.info('Id магазина обнаружен')
         dig_username = "dig_id" + payment_data["inv"]
-        async with rq.get_session() as session:
-            order_id_check = await rq.get_full_transaction_info(payment_data["inv"], session=session)
-            user_info = await tools.get_user_info(dig_username)
-            if user_info == 404:
-                logger.info('Регистрация новой транзакции')
-                sign = generate_signature(
-                    payment_data['id'],
-                    payment_data['inv'],
-                    secrets.get('dig_pass'),
+        order_id_check = await rq.get_full_transaction_info(payment_data["inv"], session=session)
+        user_info = await tools.get_user_info(dig_username)
+        if user_info == 404:
+            logger.info('Регистрация новой транзакции')
+            sign = generate_signature(
+                payment_data['id'],
+                payment_data['inv'],
+                secrets.get('dig_pass'),
+            )
+            logger.debug(f"Computed sign: {sign}")
+            logger.debug(f"Received sign: {payment_data.get('sign')}")
+            if payment_data.get('sign') == sign:
+                logger.info('Подпись подтверждена')
+                order_params = await tools.parse_order_params(
+                    item_id=payment_data['id'],
+                    options=payment_data['options'],
+                    id_key='id',
+                    data_key='user_data',
+                    session=session,
                 )
-                logger.debug(f"Computed sign: {sign}")
-                logger.debug(f"Received sign: {payment_data.get('sign')}")
-                if payment_data.get('sign') == sign:
-                    logger.info('Подпись подтверждена')
-                    order_params = await tools.parse_order_params(
-                        item_id=payment_data['id'],
-                        options=payment_data['options'],
-                        id_key='id',
-                        data_key='user_data',
-                    )
-                    days = order_params['days'] if order_params['days'] is not None else 30
-                    hwid = order_params['hwid']
-                    external_sq = order_params['outer_squad']
-                    internal_sq = order_params['template']
-                    await rq.set_user(int(f"44{payment_data['inv']}"), session=session)
-                    await rq.create_transaction(
-                        user_tg_id=int(f"44{payment_data['inv']}"),
-                        user_transaction=str(uuid.uuid4()),
-                        username=dig_username,
-                        days=days,
-                        session=session,
-                    )
-                    goods = await tools.create_subscription_for_order(content_id=payment_data["inv"],
-                                                                      days=days,
-                                                                      email=f"{payment_data['inv']}@cheeze.com",
-                                                                      template=internal_sq,
-                                                                      outer_squad_id=external_sq,
-                                                                      hwid=hwid,
-                                                                      store_name="DIG",
-                                                                      user_info=user_info)
-                    return goods["sub"]
-                else:
-                    return 400
+                days = order_params['days'] if order_params['days'] is not None else 30
+                hwid = order_params['hwid']
+                external_sq = order_params['outer_squad']
+                internal_sq = order_params['template']
+                await rq.set_user(int(f"44{payment_data['inv']}"), session=session)
+                await rq.create_transaction(
+                    user_tg_id=int(f"44{payment_data['inv']}"),
+                    user_transaction=str(uuid.uuid4()),
+                    username=dig_username,
+                    days=days,
+                    session=session,
+                )
+                goods = await tools.create_subscription_for_order(content_id=payment_data["inv"],
+                                                                  days=days,
+                                                                  email=f"{payment_data['inv']}@cheeze.com",
+                                                                  template=internal_sq,
+                                                                  outer_squad_id=external_sq,
+                                                                  hwid=hwid,
+                                                                  store_name="DIG",
+                                                                  user_info=user_info)
+                return goods["sub"]
             else:
-                return user_info['subscription_url']
+                return 400
+        else:
+            return user_info['subscription_url']
