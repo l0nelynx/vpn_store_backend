@@ -135,12 +135,13 @@ async def get_order_info(
         return data
 
 
-async def get_order_params(order_info: dict) -> dict:
+async def get_order_params(order_info: dict, session=None) -> dict:
     return await parse_order_params(
         item_id=order_info['content']['item_id'],
         options=order_info['content']['options'],
         id_key='id',
         data_key='user_data_id',
+        session=session,
     )
 
 
@@ -152,9 +153,10 @@ async def order_register_routine(
     token: str,
     hwid: int = None,
     outer_squad: str = None,
+    db_session=None,
 ) -> None:
     content_id = order_info['content']['content_id']
-    email = order_info['content']['buyer_info']['email'] # Get buyer email
+    email = order_info['content']['buyer_info']['email']
     user_id = _ggsel_user_id(content_id)
     await send_alert('Найден новый оплаченный заказ, регистрация заказа', "GGSELL")
     await rq.create_transaction(
@@ -162,6 +164,7 @@ async def order_register_routine(
         user_transaction=str(uuid.uuid4()),
         username=f"99{content_id}",
         days=days,
+        session=db_session,
     )
     goods = await create_subscription_for_order(content_id, days, template, "GG", email, hwid, outer_squad)
     await send_alert('Подписка сформирована', "GGSELL")
@@ -172,7 +175,7 @@ async def order_register_routine(
         token=token,
     )
     if delivery_status == 200:
-        await rq.update_delivery_status(user_id, 1)
+        await rq.update_delivery_status(user_id, 1, session=db_session)
 
 
 async def order_already_registered_routine(
@@ -184,9 +187,10 @@ async def order_already_registered_routine(
     token: str,
     hwid: int = None,
     outer_squad: str = None,
+    db_session=None,
 ) -> None:
     content_id = order_info['content']['content_id']
-    email = order_info['content']['buyer_info']['email'] # Get buyer email
+    email = order_info['content']['buyer_info']['email']
     user_id = _ggsel_user_id(content_id)
     if order_id_check['delivery_status'] == 0:
         goods = await create_subscription_for_order(content_id, days, template, "GG", email, hwid, outer_squad)
@@ -197,7 +201,7 @@ async def order_already_registered_routine(
             token=token,
         )
         if delivery_status == 200:
-            await rq.update_delivery_status(user_id, 1)
+            await rq.update_delivery_status(user_id, 1, session=db_session)
     else:
         logger.info("Товар уже был отправлен покупателю")
 
@@ -222,13 +226,15 @@ async def check_new_orders(
                 )
                 order_id_check = await rq.get_full_transaction_info_by_id(
                     _ggsel_user_id(content_id),
+                    session=db_session,
                 )
-                order_params = await get_order_params(order_info)
+                order_params = await get_order_params(order_info, session=db_session)
                 if order_id_check == 404:
                     logger.info("Новый заказ")
                     await order_register_routine(
                         order_info, order_params["days"],
                         order_params["template"], session, token, order_params['hwid'], order_params["outer_squad"],
+                        db_session=db_session,
                     )
                 else:
                     logger.info(
@@ -238,6 +244,7 @@ async def check_new_orders(
                     await order_already_registered_routine(
                         order_id_check, order_info, order_params["days"],
                         order_params["template"], session, token, order_params['hwid'], order_params["outer_squad"],
+                        db_session=db_session,
                     )
         else:
             logger.info("Заказ оплачен либо отменен: %s", sale['invoice_id'])

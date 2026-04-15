@@ -9,13 +9,14 @@ import store.api.remnawave.api as rem
 logger = logging.getLogger(__name__)
 
 
-async def parse_order_params(item_id, options: list[dict], id_key: str = 'id', data_key: str = 'user_data_id') -> dict:
+async def parse_order_params(item_id, options: list[dict], id_key: str = 'id', data_key: str = 'user_data_id', session=None) -> dict:
     result = {}
     for option in options:
         params = await rq.get_order_params_dict(
             item_id=item_id,
             param_id=option[id_key],
             user_data_id=option[data_key],
+            session=session,
         )
         result.update(params)
     days = result.get('days')

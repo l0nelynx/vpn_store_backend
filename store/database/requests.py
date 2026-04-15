@@ -215,24 +215,25 @@ async def get_full_transaction_info(transaction_id: str, session=None):
             return None
 
 
-async def get_full_transaction_info_by_id(user_id: int):
+async def get_full_transaction_info_by_id(user_id: int, session=None):
     """
     Получает полную информацию о транзакции и связанном пользователе
 
     Args:
         user_id (int): Идентификатор пользователя
+        session: Опциональная существующая сессия БД
 
     Returns:
-        dict: Словарь с информацией о транзакции и пользователе или None
+        dict: Словарь с информацией о транзакции и пользователе или 404
     """
-    async with async_session() as session:
+    async with get_session(session) as s:
         query = (
             select(Transaction, User)
             .join(User, User.id == Transaction.user_id)
             .where(User.tg_id == user_id)
         )
 
-        result = await session.execute(query)
+        result = await s.execute(query)
         row = result.first()
 
         if row:
@@ -246,7 +247,6 @@ async def get_full_transaction_info_by_id(user_id: int):
                 "user_tg_id": user.tg_id,
                 "user_db_id": user.id,
                 "days_ordered": transaction.days_ordered
-                # Добавьте другие поля по необходимости
             }
         else:
             return 404
@@ -279,8 +279,8 @@ async def update_order_status(transaction_id: str, new_status: str) -> bool:
         return True
 
 
-async def update_delivery_status(tg_id: int, new_delivery_status: int):
-    async with async_session() as session:
+async def update_delivery_status(tg_id: int, new_delivery_status: int, session=None):
+    async with get_session(session) as session:
         # Находим пользователя по tg_id
         user = await session.scalar(
             select(User).where(User.tg_id == tg_id)
@@ -311,9 +311,9 @@ async def create_order_param(item_id: int, param_id: int, user_data_id: int, typ
         await session.commit()
 
 
-async def get_order_params_dict(item_id: int, param_id: int, user_data_id: int) -> dict[str, str]:
-    async with async_session() as session:
-        result = await session.scalars(
+async def get_order_params_dict(item_id: int, param_id: int, user_data_id: int, session=None) -> dict[str, str]:
+    async with get_session(session) as s:
+        result = await s.scalars(
             select(OrderParam).where(
                 OrderParam.item_id == item_id,
                 OrderParam.param_id == param_id,
@@ -354,9 +354,9 @@ async def update_order_param(record_id: int, **kwargs) -> bool:
         return True
 
 
-async def item_id_exists(item_id: int) -> bool:
-    async with async_session() as session:
-        result = await session.scalar(
+async def item_id_exists(item_id: int, session=None) -> bool:
+    async with get_session(session) as s:
+        result = await s.scalar(
             select(OrderParam.id).where(OrderParam.item_id == item_id).limit(1)
         )
         return result is not None
