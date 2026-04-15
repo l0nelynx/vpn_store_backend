@@ -151,8 +151,8 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
                             user_data_id=option['user_data'],
                         )
                         result.update(params)
-                    days = result.get('days')
-                    hwid = result.get('hwid')
+                    days = int(result.get('days')) if result.get('days') else 30
+                    hwid = int(result.get('hwid')) if result.get('hwid') else None
                     external_sq=result.get('external_sq')
                     internal_sq=result.get('location')
                     logger.debug("Order params from DB: %s", result)
