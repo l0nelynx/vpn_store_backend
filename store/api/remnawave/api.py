@@ -1,18 +1,17 @@
-import os
-import asyncio
+import logging
 import uuid
 import datetime
 
 from store.settings import secrets
+
+logger = logging.getLogger(__name__)
 from remnawave.enums import TrafficLimitStrategy, UserStatus
 from remnawave import RemnawaveSDK  # Updated import for new package
-from remnawave.models import (  # Updated import path
+from remnawave.models import (
     UsersResponseDto,
     UserResponseDto,
     CreateUserRequestDto,
     UpdateUserRequestDto,
-    GetAllConfigProfilesResponseDto,
-    CreateInternalSquadRequestDto
 )
 
 _sdk_instance: RemnawaveSDK | None = None
@@ -28,6 +27,15 @@ def get_sdk() -> RemnawaveSDK:
     return _sdk_instance
 
 
+async def close_sdk():
+    global _sdk_instance
+    if _sdk_instance is not None:
+        if hasattr(_sdk_instance, 'close'):
+            await _sdk_instance.close()
+        _sdk_instance = None
+        logger.info("RemnaWave SDK closed")
+
+
 async def get_all_users():
     """Получает список всех пользователей из RemnaWave"""
     remnawave = get_sdk()
@@ -35,8 +43,8 @@ async def get_all_users():
     response: UsersResponseDto = await remnawave.users.get_all_users_v2()
     total_users: int = response.total
     users: list[UserResponseDto] = response.users
-    print("Total users: ", total_users)
-    print("List of users: ", users)
+    logger.info("Total users: %s", total_users)
+    logger.debug("List of users: %s", users)
 
 
 async def get_user_from_username(username: str):
@@ -68,7 +76,7 @@ async def get_user_from_username(username: str):
             "traffic_used": response.used_traffic_bytes // (1024 * 1024 * 1024) if response.used_traffic_bytes else 0
         }
     except Exception as e:
-        print(f"Error getting user {username} from RemnaWave: {e}")
+        logger.error("Error getting user %s from RemnaWave: %s", username, e)
         return None
 
 
@@ -143,7 +151,7 @@ async def create_user(
             "email": response.email
         }
     except Exception as e:
-        print(f"Error creating user {username} in RemnaWave: {e}")
+        logger.error("Error creating user %s in RemnaWave: %s", username, e)
         return None
 
 
@@ -211,7 +219,7 @@ async def update_user(
             "status": "active" if response.status == UserStatus.ACTIVE else "inactive"
         }
     except Exception as e:
-        print(f"Error updating user {user_uuid} in RemnaWave: {e}")
+        logger.error("Error updating user %s in RemnaWave: %s", user_uuid, e)
         return None
 
 
@@ -230,7 +238,7 @@ async def delete_user(user_uuid: str) -> bool:
         await remnawave.users.delete_user(user_uuid)
         return True
     except Exception as e:
-        print(f"Error deleting user {user_uuid} from RemnaWave: {e}")
+        logger.error("Error deleting user %s from RemnaWave: %s", user_uuid, e)
         return False
 
 async def get_user_subscription_link(user_uuid: str) -> str:
@@ -248,5 +256,5 @@ async def get_user_subscription_link(user_uuid: str) -> str:
         response: UserResponseDto = await remnawave.users.get_user_by_uuid(user_uuid)
         return response.subscription_url if response else None
     except Exception as e:
-        print(f"Error getting subscription link for user {user_uuid} from RemnaWave: {e}")
+        logger.error("Error getting subscription link for user %s from RemnaWave: %s", user_uuid, e)
         return None

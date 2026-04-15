@@ -4,8 +4,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 engine = create_async_engine(
     url='sqlite+aiosqlite:///db/backend_db.sqlite3',
-    pool_size=5,
-    max_overflow=10,
+    pool_size=1,
+    max_overflow=0,
     pool_pre_ping=True,
 )
 

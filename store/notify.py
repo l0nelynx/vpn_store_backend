@@ -2,8 +2,7 @@ import logging
 
 from store.settings import backend_bot as bot
 from store.settings import secrets
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 async def webhook_tg_notify(payment_data, store_name: str):
@@ -15,7 +14,7 @@ async def webhook_tg_notify(payment_data, store_name: str):
     return 200
 
 async def send_tg_alert(message: str, store_name: str):
-    print(message)
+    logger.info(message)
     await bot.send_message(chat_id=secrets.get('admin_id'),
                            text=f"<b>{store_name} ALERT</b>\n\n"
                                 f"{message}",

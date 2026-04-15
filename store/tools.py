@@ -1,10 +1,33 @@
+import logging
 import uuid
 import time
 import store.database.requests as rq
 from store.notify import send_tg_alert
 from store.settings import secrets
-from store.settings import backend_bot as bot
 import store.api.remnawave.api as rem
+
+logger = logging.getLogger(__name__)
+
+
+async def parse_order_params(item_id, options: list[dict], id_key: str = 'id', data_key: str = 'user_data_id') -> dict:
+    result = {}
+    for option in options:
+        params = await rq.get_order_params_dict(
+            item_id=item_id,
+            param_id=option[id_key],
+            user_data_id=option[data_key],
+        )
+        result.update(params)
+    days = result.get('days')
+    hwid = result.get('hwid')
+    logger.debug("Order params from DB: %s", result)
+    return {
+        "days": int(days) if days is not None else None,
+        "template": result.get('location'),
+        "hwid": int(hwid) if hwid is not None else None,
+        "outer_squad": result.get('external_sq'),
+    }
+
 
 async def create_subscription_for_order(content_id, days: int, template,
                                         store_name: str = "GG",
@@ -26,8 +49,11 @@ async def create_subscription_for_order(content_id, days: int, template,
             hwid=hwid,
             outer_squad_id=outer_squad_id
         )
-        print('Отправка ссылки на подписку')
-        print(buyer_nfo['subscription_url'])
+        if buyer_nfo is None:
+            logger.error("Failed to create user for order %s", content_id)
+            return {"sub": None}
+        logger.info('Отправка ссылки на подписку')
+        logger.info(buyer_nfo['subscription_url'])
         await send_tg_alert(message=f"<b>⚠️ New {store_name.lower()} Order</b>\n"
                                     f"<b>🎫 OrderId: </b><code>{content_id}</code>\n"
                                     f"<b>👤 Email: </b><code>{email if email is not None else 'None'}</code>\n"
@@ -40,7 +66,7 @@ async def create_subscription_for_order(content_id, days: int, template,
         result = {"sub": subscription_link}
         return result
     else:
-        print('Пользователь уже существует')
+        logger.info('Пользователь уже существует')
         subscription_link = user_info['subscription_url']
         result = {"sub": subscription_link}
         return result
@@ -61,7 +87,7 @@ async def add_new_user_info(
         if expire_days > 10000:
             current_time = time.time()
             expire_days = max(1, round((expire_days - current_time) / (24 * 60 * 60)))
-            print(f"Warning: expire_days was UNIX timestamp, converted to {expire_days} days")
+            logger.warning("expire_days was UNIX timestamp, converted to %d days", expire_days)
 
         if email is None:
             email = f"{name}@marzban.ru"
@@ -85,12 +111,12 @@ async def add_new_user_info(
                 vless_uuid=buyer_nfo.get("uuid"),
                 api_provider="remnawave"
             )
-            print(f'DB updated with RemnaWave user info for {name}')
+            logger.info('DB updated with RemnaWave user info for %s', name)
 
         return buyer_nfo
 
     except Exception as e:
-        print(f"Error adding new user: {e}")
+        logger.error("Error adding new user: %s", e)
         return None
 
 async def get_user_info(username):
@@ -112,5 +138,5 @@ async def get_user_info(username):
             }
         return 404
     except Exception as e:
-        print(f"Error getting user info: {e}")
+        logger.error("Error getting user info: %s", e)
         return 404

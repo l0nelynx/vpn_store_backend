@@ -80,7 +80,7 @@ async def payment_webhook(request: Request, response: Response):
 async def ggsel_payment_webhook(request: Request, response: Response):
     try:
         payment_data = await request.json()
-        print(payment_data)
+        logging.debug("GGsel webhook data: %s", payment_data)
         status = await webhook_tg_notify(payment_data, "GGSELL")
         return status
     except Exception as e:

@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from sqlalchemy import select, update
@@ -5,6 +6,8 @@ from sqlalchemy.orm import selectinload
 
 from store.database.models import User, Transaction, OrderParam
 from store.database.models import async_session
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -70,7 +73,7 @@ async def create_user_with_info(tg_id: int, username: str, vless_uuid: str = Non
         new_user = User(
             tg_id=tg_id,
             username=username,
-            vless_uuid=f"{vless_uuid}",
+            vless_uuid=str(vless_uuid),
             api_provider=api_provider
         )
         session.add(new_user)
@@ -78,7 +81,7 @@ async def create_user_with_info(tg_id: int, username: str, vless_uuid: str = Non
         return new_user
 
 
-async def update_user_api_info(tg_id: int = 0, username: str = 0, vless_uuid: str = None, api_provider: str = None, session=None):
+async def update_user_api_info(tg_id: int = 0, username: str = None, vless_uuid: str = None, api_provider: str = None, session=None):
     async with get_session(session) as s:
         user = await s.scalar(select(User).where(User.tg_id == tg_id))
 
@@ -87,7 +90,7 @@ async def update_user_api_info(tg_id: int = 0, username: str = 0, vless_uuid: st
         if username is not None:
             user.username = username
         if vless_uuid is not None:
-            user.vless_uuid = f"{vless_uuid}"
+            user.vless_uuid = str(vless_uuid)
         if api_provider is not None:
             user.api_provider = api_provider
 
@@ -291,9 +294,9 @@ async def update_delivery_status(tg_id: int, new_delivery_status: int):
                 .values(delivery_status=new_delivery_status)
             )
             await session.commit()
-            print(f"Updated delivery_status to {new_delivery_status} for user {tg_id}")
+            logger.info("Updated delivery_status to %s for user %s", new_delivery_status, tg_id)
         else:
-            print(f"User with tg_id {tg_id} not found")
+            logger.warning("User with tg_id %s not found", tg_id)
 
 
 async def create_order_param(item_id: int, param_id: int, user_data_id: int, type_: str, data: str):
@@ -349,6 +352,14 @@ async def update_order_param(record_id: int, **kwargs) -> bool:
                 setattr(param, key, value)
         await session.commit()
         return True
+
+
+async def item_id_exists(item_id: int) -> bool:
+    async with async_session() as session:
+        result = await session.scalar(
+            select(OrderParam.id).where(OrderParam.item_id == item_id).limit(1)
+        )
+        return result is not None
 
 
 async def delete_order_param(record_id: int) -> bool:

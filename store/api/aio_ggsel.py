@@ -1,6 +1,5 @@
 import aiohttp
 import asyncio
-import json
 import logging
 import time
 import hashlib
@@ -9,7 +8,7 @@ import uuid
 from store.settings import secrets
 import store.database.requests as rq
 from store.notify import send_tg_alert as send_alert
-from store.tools import create_subscription_for_order
+from store.tools import create_subscription_for_order, parse_order_params
 
 logger = logging.getLogger(__name__)
 
@@ -137,24 +136,12 @@ async def get_order_info(
 
 
 async def get_order_params(order_info: dict) -> dict:
-    item_id = order_info['content']['item_id']
-    result = {}
-    for option in order_info['content']['options']:
-        params = await rq.get_order_params_dict(
-            item_id=item_id,
-            param_id=option['id'],
-            user_data_id=option['user_data_id'],
-        )
-        result.update(params)
-    days = result.get('days')
-    hwid = result.get('hwid')
-    logger.debug("Order params from DB: %s", result)
-    return {
-        "days": int(days) if days is not None else None,
-        "template": result.get('location'),
-        "hwid": int(hwid) if hwid is not None else None,
-        "outer_squad": result.get('external_sq'),
-    }
+    return await parse_order_params(
+        item_id=order_info['content']['item_id'],
+        options=order_info['content']['options'],
+        id_key='id',
+        data_key='user_data_id',
+    )
 
 
 async def order_register_routine(

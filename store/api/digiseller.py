@@ -1,53 +1,15 @@
 import hashlib
-import json
 import logging
-import os
 import uuid
-from pathlib import Path
 from typing import Any, Optional
-from uuid import UUID
-import store.api.remnawave.squads as squads
 
 import store.tools as tools
-from pydantic import BaseModel
-from store.settings import backend_bot as bot
 
 import store.database.requests as rq
 
 from store.settings import secrets
 
 logger = logging.getLogger(__name__)
-
-file_path = "dig_data.json"
-
-config_path = Path(__file__).parent.parent.parent / file_path
-
-JSON_PATH = config_path
-
-_json_cache_data: dict | None = None
-_json_cache_mtime: float = 0.0
-
-
-def _load_json_cached(json_file_path: Path) -> dict | None:
-    global _json_cache_data, _json_cache_mtime
-    try:
-        mtime = os.path.getmtime(json_file_path)
-        if _json_cache_data is not None and mtime == _json_cache_mtime:
-            return _json_cache_data
-        with open(json_file_path, 'r') as stream:
-            _json_cache_data = json.load(stream)
-        _json_cache_mtime = mtime
-        return _json_cache_data
-    except Exception as e:
-        logger.debug(f"Error loading JSON cache: {e}")
-        return None
-
-
-class DigisellerResponse(BaseModel):
-    id: str
-    inv: int
-    goods: str
-    error: str
 
 
 def generate_signature(
@@ -75,54 +37,11 @@ def generate_signature(
         return None
 
 
-def get_variant_info(
-    json_file_path: Path,
-    merchant_id: Any,
-    variant_id: Any,
-    field: Optional[str] = None,
-) -> Optional[Any]:
-    try:
-        data = _load_json_cached(json_file_path)
-        if data is None:
-            return None
-
-        variant_id_str = str(variant_id)
-        variant_info = data['var_ids'][f'{merchant_id}']['variants'].get(variant_id_str)
-
-        if variant_info is None:
-            return None
-
-        return variant_info if field is None else variant_info.get(field)
-
-    except Exception as e:
-        logger.debug(f"Произошла ошибка: {e}")
-        return None
-
-
-def extract_dig_items(secrets_in: Any) -> dict[int, Any]:
-    result = {}
-    index = 0
-    while True:
-        key = f"dig_item_id_{index}"
-        value = secrets_in.get(key)
-        if value is None:
-            break
-        result[index] = value
-        index += 1
-    return result
-
-
-def check_id_exists_efficient(target_id: Any, secrets_in: Any) -> bool:
-    dig_items = extract_dig_items(secrets_in)
-    values_set = set(dig_items.values())
-    return str(target_id) in values_set
-
-
 async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
     logger.info(f"Получен вебхук от магазина: {payment_data}")
     if 'id' not in payment_data or 'inv' not in payment_data or 'options' not in payment_data:
         return 400
-    if check_id_exists_efficient(payment_data['id'], secrets):
+    if await rq.item_id_exists(int(payment_data['id'])):
         logger.info('Id магазина обнаружен')
         dig_username = "dig_id" + payment_data["inv"]
         async with rq.get_session() as session:
@@ -130,9 +49,6 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
             user_info = await tools.get_user_info(dig_username)
             if user_info == 404:
                 logger.info('Регистрация новой транзакции')
-                merchant_id = payment_data['options'][0]['id']
-                tariff_id = payment_data['options'][0]['user_data']
-                # days = get_variant_info(JSON_PATH, merchant_id, tariff_id, 'days')
                 sign = generate_signature(
                     payment_data['id'],
                     payment_data['inv'],
@@ -142,20 +58,16 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
                 logger.debug(f"Received sign: {payment_data.get('sign')}")
                 if payment_data.get('sign') == sign:
                     logger.info('Подпись подтверждена')
-                    item_id = payment_data['id']
-                    result = {}
-                    for option in payment_data['options']:
-                        params = await rq.get_order_params_dict(
-                            item_id=item_id,
-                            param_id=option['id'],
-                            user_data_id=option['user_data'],
-                        )
-                        result.update(params)
-                    days = int(result.get('days')) if result.get('days') else 30
-                    hwid = int(result.get('hwid')) if result.get('hwid') else None
-                    external_sq=result.get('external_sq')
-                    internal_sq=result.get('location')
-                    logger.debug("Order params from DB: %s", result)
+                    order_params = await tools.parse_order_params(
+                        item_id=payment_data['id'],
+                        options=payment_data['options'],
+                        id_key='id',
+                        data_key='user_data',
+                    )
+                    days = order_params['days'] if order_params['days'] is not None else 30
+                    hwid = order_params['hwid']
+                    external_sq = order_params['outer_squad']
+                    internal_sq = order_params['template']
                     await rq.set_user(int(f"44{payment_data['inv']}"), session=session)
                     await rq.create_transaction(
                         user_tg_id=int(f"44{payment_data['inv']}"),
