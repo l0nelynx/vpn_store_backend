@@ -10,14 +10,11 @@ services:
         target: /usr/src/app/db
       - /var/lib/marzban/certs/:/usr/src/app/uvicorn/ssl
       - ./backend.yml:/usr/src/app/backend.yml
-      - ./dig_data.json:/usr/src/app/dig_data.json
     ports:
        - '127.0.0.1:5001:5001'
     networks:
       - backend-network
     restart: unless-stopped
-    tty: true
-    stdin_open: true
 networks:
   backend-network:
     name: backend-network
