@@ -17,8 +17,8 @@ class SendBody(BaseModel):
 
 
 @messages_router.get("/inbox")
-async def inbox(limit: int = 100):
-    return await rq.list_inbox_threads(limit=limit)
+async def inbox(limit: int = 50, offset: int = 0):
+    return await rq.list_inbox_threads(limit=limit, offset=offset)
 
 
 @messages_router.get("/customer/{customer_id}")

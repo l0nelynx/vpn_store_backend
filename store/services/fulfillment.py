@@ -59,18 +59,27 @@ async def fulfill_order(
     digiseller_buyer_id: str | None = None,
     session=None,
     allow_extend: bool = False,
+    rw_cache: dict | None = None,
 ) -> dict[str, Any]:
     """Idempotent provision with Remnawave as source of truth for the live sub URL.
 
     If Store says delivered but the Remnawave user was deleted → recreate panel user
     and refresh Store row (Digiseller test inv=0 after manual delete).
+
+    ``rw_cache``: optional username → user-dict|None from bulk stream to avoid N+1 GETs.
     """
     days = days if days is not None else 30
     existing = await rq.get_order_by_external(
         marketplace, external_order_id, session=session
     )
 
-    rw_live = await rem.get_user_from_username(remnawave_username)
+    if rw_cache is not None and remnawave_username in rw_cache:
+        cached = rw_cache[remnawave_username]
+        rw_live = cached if cached else None
+    else:
+        rw_live = await rem.get_user_from_username(remnawave_username)
+        if rw_cache is not None:
+            rw_cache[remnawave_username] = rw_live
 
     if existing and existing.delivery_status == 1 and rw_live and rw_live.get("subscription_url"):
         sub = rw_live["subscription_url"]

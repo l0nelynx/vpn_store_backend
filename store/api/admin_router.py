@@ -90,10 +90,10 @@ async def orders(
     remnawave_uuid: str | None = None,
     remnawave_username: str | None = None,
     external_order_id: str | None = None,
-    limit: int = Query(200, le=500),
+    limit: int = Query(50, le=500),
     offset: int = 0,
 ):
-    return await rq.list_orders(
+    items = await rq.list_orders(
         email=email,
         marketplace=marketplace,
         remnawave_uuid=remnawave_uuid,
@@ -102,6 +102,8 @@ async def orders(
         limit=limit,
         offset=offset,
     )
+    total = await rq.count_orders(email=email, marketplace=marketplace)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @admin_router.get("/customers/{customer_id}", dependencies=[Depends(verify_admin)])

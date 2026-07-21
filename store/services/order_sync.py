@@ -9,6 +9,7 @@ import aiohttp
 import store.api.aio_ggsel as ggsel
 import store.api.digiseller_client as dig
 import store.database.requests as rq
+from store.api.remnawave.users_bulk import build_username_index
 from store.services.fulfillment import fulfill_order, parse_order_params
 from store.settings import secrets
 
@@ -21,7 +22,11 @@ async def sync_ggsel_orders(top: int = 50) -> dict:
     async with aiohttp.ClientSession(base_url=base) as http:
         token = await ggsel.get_token(http)
         last = await ggsel.return_last_sales(http, top=top, token=token)
-        for sale in last.get("sales") or []:
+        sales = last.get("sales") or []
+
+        # Prefetch order details, then one Remnawave stream for all usernames
+        prepared = []
+        for sale in sales:
             try:
                 order_info = await ggsel.get_order_info(http, sale["invoice_id"], token)
                 content = order_info.get("content") or {}
@@ -35,8 +40,21 @@ async def sync_ggsel_orders(top: int = 50) -> dict:
                     continue
                 existing = await rq.get_order_by_external("ggsel", str(content_id))
                 if existing and existing.delivery_status == 1:
+                    # Still verify RW via cache later only if we want recreate —
+                    # for sync adopt path skip already-delivered.
                     skipped += 1
                     continue
+                prepared.append(content)
+            except Exception as e:
+                errors += 1
+                logger.error("sync_ggsel prefetch error: %s", e)
+
+        needed = {f"gg_id{c['content_id']}" for c in prepared}
+        rw_cache = await build_username_index(needed) if needed else {}
+
+        for content in prepared:
+            try:
+                content_id = content["content_id"]
                 options = content.get("options") or []
                 item_id = content.get("item_id")
                 buyer = content.get("buyer_info") or {}
@@ -53,7 +71,7 @@ async def sync_ggsel_orders(top: int = 50) -> dict:
                     remnawave_username=f"gg_id{content_id}",
                     days=days,
                     email=buyer.get("email"),
-                    invoice_id=str(content.get("invoice_id") or sale["invoice_id"]),
+                    invoice_id=str(content.get("invoice_id") or ""),
                     item_id=item_id,
                     options=options,
                     chat_id=str(content_id),
@@ -62,8 +80,9 @@ async def sync_ggsel_orders(top: int = 50) -> dict:
                     outer_squad=params["outer_squad"],
                     ggsel_buyer_id=str(buyer.get("buyer_id") or content_id),
                     allow_extend=False,
+                    rw_cache=rw_cache,
                 )
-                if result.get("event") == "create":
+                if result.get("event") in ("create", "recreate"):
                     created += 1
                 elif result.get("event") == "adopted":
                     adopted += 1
@@ -72,12 +91,20 @@ async def sync_ggsel_orders(top: int = 50) -> dict:
             except Exception as e:
                 errors += 1
                 logger.error("sync_ggsel_orders sale error: %s", e)
-    return {"marketplace": "ggsel", "top": top, "adopted": adopted, "created": created, "skipped": skipped, "errors": errors}
+    return {
+        "marketplace": "ggsel",
+        "top": top,
+        "adopted": adopted,
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+        "rw_cache_hits": sum(1 for v in rw_cache.values() if v),
+    }
 
 
 async def sync_digiseller_orders(top: int = 50) -> dict:
-    """Best-effort: Digiseller seller-last-sales (same shape as GGsel when available)."""
     adopted = created = skipped = errors = 0
+    rw_cache: dict = {}
     async with aiohttp.ClientSession() as http:
         token = await dig.get_token(http)
         if not token:
@@ -91,18 +118,28 @@ async def sync_digiseller_orders(top: int = 50) -> dict:
                 "detail": "dig_seller_id / dig_api_key not configured",
             }
         sales = await dig.list_last_sales(http, token, top=top)
+        prepared = []
         for sale in sales:
+            inv = sale.get("invoice_id") or sale.get("inv") or sale.get("id_i")
+            if inv is None:
+                skipped += 1
+                continue
+            existing = await rq.get_order_by_external("digiseller", str(inv))
+            if existing and existing.delivery_status == 1:
+                skipped += 1
+                continue
+            prepared.append(sale)
+
+        needed = {
+            f"dig_id{s.get('invoice_id') or s.get('inv') or s.get('id_i')}"
+            for s in prepared
+        }
+        rw_cache = await build_username_index(needed) if needed else {}
+
+        for sale in prepared:
             try:
                 inv = sale.get("invoice_id") or sale.get("inv") or sale.get("id_i")
                 item_id = sale.get("id_goods") or sale.get("id") or sale.get("item_id")
-                if inv is None:
-                    skipped += 1
-                    continue
-                existing = await rq.get_order_by_external("digiseller", str(inv))
-                if existing and existing.delivery_status == 1:
-                    skipped += 1
-                    continue
-                # Minimal adopt by Remnawave username dig_id{inv}
                 email = sale.get("email") or sale.get("buyer_email")
                 options = sale.get("options") or []
                 params = {"days": 30, "template": None, "hwid": None, "outer_squad": None}
@@ -129,8 +166,9 @@ async def sync_digiseller_orders(top: int = 50) -> dict:
                     outer_squad=params.get("outer_squad"),
                     digiseller_buyer_id=str(sale.get("buyer_id") or inv),
                     allow_extend=False,
+                    rw_cache=rw_cache,
                 )
-                if result.get("event") == "create":
+                if result.get("event") in ("create", "recreate"):
                     created += 1
                 elif result.get("event") == "adopted":
                     adopted += 1
@@ -146,6 +184,7 @@ async def sync_digiseller_orders(top: int = 50) -> dict:
         "created": created,
         "skipped": skipped,
         "errors": errors,
+        "rw_cache_hits": sum(1 for v in rw_cache.values() if v),
     }
 
 

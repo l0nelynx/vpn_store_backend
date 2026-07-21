@@ -484,12 +484,20 @@ async def list_messages(
         ]
 
 
-async def list_inbox_threads(limit: int = 100, session=None) -> list[dict]:
-    """One thread per customer (or orphan order chat)."""
+async def list_inbox_threads(
+    limit: int = 50,
+    offset: int = 0,
+    session=None,
+) -> dict:
+    """Paginated threads: one per customer."""
     async with get_session(session) as s:
+        total = await s.scalar(select(func.count()).select_from(Customer)) or 0
         customers = (
             await s.scalars(
-                select(Customer).order_by(Customer.updated_at.desc()).limit(limit)
+                select(Customer)
+                .order_by(Customer.updated_at.desc())
+                .offset(offset)
+                .limit(limit)
             )
         ).all()
         threads = []
@@ -516,7 +524,32 @@ async def list_inbox_threads(limit: int = 100, session=None) -> list[dict]:
                     ),
                 }
             )
-        return threads
+        return {
+            "items": threads,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+async def count_orders(
+    *,
+    email: str | None = None,
+    marketplace: str | None = None,
+    session=None,
+) -> int:
+    async with get_session(session) as s:
+        stmt = select(func.count()).select_from(Order)
+        if email or marketplace:
+            stmt = select(func.count()).select_from(Order).outerjoin(
+                Customer, Customer.id == Order.customer_id
+            )
+            if email:
+                norm = normalize_email(email) or email.strip().lower()
+                stmt = stmt.where(Customer.email_normalized == norm)
+            if marketplace:
+                stmt = stmt.where(Order.marketplace == marketplace)
+        return await s.scalar(stmt) or 0
 
 
 # ── Order params (dashboard-compatible) ─────────────────────────────────────

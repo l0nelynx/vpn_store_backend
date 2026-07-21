@@ -25,10 +25,14 @@ type Order = {
   external_order_id: string;
 };
 
+const PAGE_SIZE = 20;
+
 export default function InboxPage() {
   const [params] = useSearchParams();
   const initialCustomer = params.get("customer");
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [customerId, setCustomerId] = useState<number | null>(
     initialCustomer ? Number(initialCustomer) : null,
   );
@@ -38,11 +42,18 @@ export default function InboxPage() {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
 
+  async function loadThreads(p = page) {
+    const offset = p * PAGE_SIZE;
+    const res = await api<{ items: Thread[]; total: number }>(
+      `/store/api/messages/inbox?limit=${PAGE_SIZE}&offset=${offset}`,
+    );
+    setThreads(res.items);
+    setTotal(res.total);
+  }
+
   useEffect(() => {
-    api<Thread[]>("/store/api/messages/inbox")
-      .then(setThreads)
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed"));
-  }, []);
+    loadThreads(page).catch((e) => setError(e instanceof Error ? e.message : "Failed"));
+  }, [page]);
 
   useEffect(() => {
     if (!customerId) return;
@@ -61,6 +72,8 @@ export default function InboxPage() {
     const t = threads.find((x) => x.customer_id === customerId);
     return t?.email || (customerId ? `Customer #${customerId}` : "Select a thread");
   }, [threads, customerId]);
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   async function send(e: FormEvent) {
     e.preventDefault();
@@ -83,7 +96,7 @@ export default function InboxPage() {
       <h2>Inbox</h2>
       {error && <p className="error">{error}</p>}
       <div className="row" style={{ alignItems: "stretch" }}>
-        <div className="card" style={{ width: 280 }}>
+        <div className="card" style={{ width: 300 }}>
           {threads.map((t) => (
             <button
               key={t.customer_id}
@@ -100,6 +113,11 @@ export default function InboxPage() {
             </button>
           ))}
           {!threads.length && <p className="muted">No threads yet.</p>}
+          <div className="pager">
+            <button disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>Prev</button>
+            <span className="muted">{page + 1} / {pageCount} ({total})</span>
+            <button disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>Next</button>
+          </div>
         </div>
         <div className="card" style={{ flex: 1, minWidth: 280 }}>
           <h3 style={{ marginTop: 0 }}>{title}</h3>

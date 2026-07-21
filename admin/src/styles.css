@@ -105,6 +105,70 @@ th { color: var(--muted); font-weight: 600; }
 .msg.out { background: #1e3a32; margin-left: auto; }
 .thread { max-height: 55vh; overflow: auto; padding: 0.5rem; }
 .error { color: var(--danger); }
+
+.pager {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.tree-node {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+}
+.tree-node.nested {
+  background: rgba(255,255,255,0.02);
+  margin-top: 6px;
+}
+.tree-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.tree-caret { color: var(--muted); width: 1rem; font-size: 0.75rem; }
+.tree-label { color: var(--muted); font-size: 0.75rem; margin-right: 4px; }
+.tree-value {
+  font-family: ui-monospace, Consolas, monospace;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.tree-children { padding: 0 0 8px 12px; }
+.tree-add {
+  margin-left: auto;
+  padding: 0.2rem 0.5rem;
+  opacity: 0.7;
+}
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  margin-bottom: 4px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 6px;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 1rem;
+}
+.modal { width: min(420px, 96vw); }
+
 @media (max-width: 800px) {
   .layout { flex-direction: column; }
   .nav { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }

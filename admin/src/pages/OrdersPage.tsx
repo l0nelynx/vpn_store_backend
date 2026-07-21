@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 
@@ -16,26 +16,44 @@ type Order = {
   created_at: string | null;
 };
 
+const PAGE_SIZE = 50;
+
 export default function OrdersPage() {
   const [email, setEmail] = useState("");
   const [marketplace, setMarketplace] = useState("");
   const [orders, setOrders] = useState<Order[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
 
-  async function search(e?: FormEvent) {
-    e?.preventDefault();
+  async function search(p = page) {
     setError("");
     try {
       const q = new URLSearchParams();
       if (email) q.set("email", email);
       if (marketplace) q.set("marketplace", marketplace);
-      q.set("limit", "200");
-      setOrders(await api<Order[]>(`/store/api/admin/orders?${q}`));
+      q.set("limit", String(PAGE_SIZE));
+      q.set("offset", String(p * PAGE_SIZE));
+      const res = await api<{ items: Order[]; total: number }>(
+        `/store/api/admin/orders?${q}`,
+      );
+      setOrders(res.items);
+      setTotal(res.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed");
     }
+  }
+
+  useEffect(() => {
+    search(page);
+  }, [page]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setPage(0);
+    await search(0);
   }
 
   async function syncSales() {
@@ -48,13 +66,15 @@ export default function OrdersPage() {
         { method: "POST" },
       );
       setMsg(JSON.stringify(res));
-      await search();
+      await search(page);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed");
     } finally {
       setSyncing(false);
     }
   }
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div>
@@ -65,10 +85,9 @@ export default function OrdersPage() {
         </button>
       </div>
       <p className="muted">
-        Список из БД Store. Digiseller появляется после webhook или Sync.
-        Poll по умолчанию тянет только <code>ggsel_top_value</code> последних GGsel.
+        Remnawave lookups during sync use <code>/api/users/stream</code> (bulk), not per-user GETs.
       </p>
-      <form className="card row" onSubmit={search}>
+      <form className="card row" onSubmit={onSubmit}>
         <input
           placeholder="Filter by email"
           value={email}
@@ -114,6 +133,11 @@ export default function OrdersPage() {
             )}
           </tbody>
         </table>
+        <div className="pager">
+          <button disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>Prev</button>
+          <span className="muted">{page + 1} / {pageCount} ({total})</span>
+          <button disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>Next</button>
+        </div>
       </div>
     </div>
   );
