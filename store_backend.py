@@ -9,6 +9,7 @@ from aiogram import Dispatcher, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from fastapi import Request, Response, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -27,7 +28,24 @@ app_uvi.include_router(messages_router)
 
 _admin_dist = Path(__file__).parent / "admin" / "dist"
 if _admin_dist.is_dir():
-    app_uvi.mount("/store/admin", StaticFiles(directory=str(_admin_dist), html=True), name="admin")
+    _assets = _admin_dist / "assets"
+    if _assets.is_dir():
+        app_uvi.mount(
+            "/store/admin/assets",
+            StaticFiles(directory=str(_assets)),
+            name="admin-assets",
+        )
+
+    @app_uvi.get("/store/admin")
+    @app_uvi.get("/store/admin/")
+    @app_uvi.get("/store/admin/{full_path:path}")
+    async def admin_spa(full_path: str = ""):
+        """SPA fallback so /store/admin/parameters etc. serve index.html."""
+        if full_path:
+            candidate = _admin_dist / full_path
+            if candidate.is_file():
+                return FileResponse(candidate)
+        return FileResponse(_admin_dist / "index.html")
 
 router = Router()
 

@@ -146,31 +146,55 @@ async def sync_ggsel_options(
             "detail": "no ggsel products in DB — sync catalog first",
         }
 
-    # Digiseller-compatible v1 options host; auth: dig token preferred, else GGsel token
+    # Options API is Digiseller-compatible on dig host; must auth as GGsel seller
+    # (dig_seller token only sees Digiseller-owned products → "Product not found").
     base = (
         secrets.get("ggsel_options_url")
         or secrets.get("dig_url")
         or "https://api.digiseller.com"
     ).rstrip("/")
+    ggsel_seller = secrets.get("ggsel_seller_id")
+    ggsel_key = secrets.get("ggsel_api_key")
+    if not ggsel_seller or not ggsel_key:
+        return {
+            "marketplace": "ggsel",
+            "products": 0,
+            "options": 0,
+            "variants": 0,
+            "errors": 1,
+            "detail": "ggsel_seller_id / ggsel_api_key not configured",
+        }
 
     async with aiohttp.ClientSession() as http:
-        token = await dig.get_token(http)
-        token_src = "dig"
+        token = await dig.get_token_with(
+            http, seller_id=ggsel_seller, api_key=ggsel_key, base_url=base
+        )
+        token_src = "ggsel_via_dig_apilogin"
         if not token:
+            # Fallback: seller.ggsel.com apilogin, then call dig options host with that token
             ggsel_base = secrets.get("ggsel_base_url") or "https://seller.ggsel.com"
-            async with aiohttp.ClientSession(base_url=ggsel_base) as ghttp:
-                try:
+            try:
+                async with aiohttp.ClientSession(base_url=ggsel_base) as ghttp:
                     token = await ggsel.get_token(ghttp)
-                    token_src = "ggsel"
-                except Exception as e:
-                    return {
-                        "marketplace": "ggsel",
-                        "products": 0,
-                        "options": 0,
-                        "variants": 0,
-                        "errors": 1,
-                        "detail": f"no dig/ggsel token: {e}",
-                    }
+                token_src = "ggsel_seller_apilogin"
+            except Exception as e:
+                return {
+                    "marketplace": "ggsel",
+                    "products": 0,
+                    "options": 0,
+                    "variants": 0,
+                    "errors": 1,
+                    "detail": f"ggsel apilogin failed: {e}",
+                }
+        if not token:
+            return {
+                "marketplace": "ggsel",
+                "products": 0,
+                "options": 0,
+                "variants": 0,
+                "errors": 1,
+                "detail": "could not obtain GGsel token for options API",
+            }
 
         total_opt = total_var = total_err = 0
         for p in products:

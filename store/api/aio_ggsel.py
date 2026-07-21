@@ -126,7 +126,7 @@ async def list_seller_goods(session: aiohttp.ClientSession, token: str) -> dict:
 
 
 def _ggsel_options_base_url() -> str:
-    """v1 options live on Digiseller-compatible host (not Seller API v2)."""
+    """v1 options live on Digiseller API host (not Seller API v2)."""
     return (
         secrets.get("ggsel_options_url")
         or secrets.get("dig_url")

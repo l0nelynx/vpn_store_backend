@@ -25,15 +25,29 @@ async def get_token(session: aiohttp.ClientSession) -> str | None:
     if not seller_id or not api_key:
         logger.warning("dig_seller_id / dig_api_key not configured")
         return None
+    return await get_token_with(
+        session, seller_id=seller_id, api_key=api_key, base_url=_base_url()
+    )
+
+
+async def get_token_with(
+    session: aiohttp.ClientSession,
+    *,
+    seller_id: str | int,
+    api_key: str,
+    base_url: str | None = None,
+) -> str | None:
+    """Digiseller-compatible apilogin (also used for GGsel seller creds on dig API host)."""
+    base = (base_url or _base_url()).rstrip("/")
     ts = int(time.time())
     sign = hashlib.sha256(f"{api_key}{ts}".encode()).hexdigest()
-    url = f"{_base_url()}/api/apilogin"
+    url = f"{base}/api/apilogin"
     payload = {"seller_id": int(seller_id), "timestamp": ts, "sign": sign}
     async with session.post(url, json=payload, headers={"Accept": "application/json"}) as resp:
         data = await resp.json(content_type=None)
-        token = data.get("token") or (data.get("retval") and data.get("token"))
-        if not token and isinstance(data, dict):
-            token = data.get("token")
+        token = data.get("token") if isinstance(data, dict) else None
+        if not token:
+            logger.warning("apilogin failed for seller %s: %s", seller_id, data)
         return token
 
 
