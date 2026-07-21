@@ -125,6 +125,35 @@ async def list_seller_goods(session: aiohttp.ClientSession, token: str) -> dict:
         return await response.json()
 
 
+def _ggsel_options_base_url() -> str:
+    """v1 options live on Digiseller-compatible host (not Seller API v2)."""
+    return (
+        secrets.get("ggsel_options_url")
+        or secrets.get("dig_url")
+        or "https://api.digiseller.com"
+    ).rstrip("/")
+
+
+async def list_product_options(
+    session: aiohttp.ClientSession, token: str, product_id: int
+) -> list[dict]:
+    from store.api.options_v1 import list_product_options as _list
+
+    return await _list(
+        session, base_url=_ggsel_options_base_url(), token=token, product_id=product_id
+    )
+
+
+async def get_product_option(
+    session: aiohttp.ClientSession, token: str, option_id: int
+) -> dict | None:
+    from store.api.options_v1 import get_product_option as _get
+
+    return await _get(
+        session, base_url=_ggsel_options_base_url(), token=token, option_id=option_id
+    )
+
+
 async def list_chats(session: aiohttp.ClientSession, token: str) -> dict:
     async with session.get(
         f"/api_sellers/api/debates/v2/chats?token={token}",

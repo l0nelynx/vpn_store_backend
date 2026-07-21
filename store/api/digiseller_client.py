@@ -116,3 +116,19 @@ async def list_last_sales(
         data = await resp.json(content_type=None)
         sales = data.get("sales") or data.get("retval") or []
         return sales if isinstance(sales, list) else []
+
+
+async def list_product_options(
+    session: aiohttp.ClientSession, token: str, product_id: int
+) -> list[dict]:
+    from store.api.options_v1 import list_product_options as _list
+
+    return await _list(session, base_url=_base_url(), token=token, product_id=product_id)
+
+
+async def get_product_option(
+    session: aiohttp.ClientSession, token: str, option_id: int
+) -> dict | None:
+    from store.api.options_v1 import get_product_option as _get
+
+    return await _get(session, base_url=_base_url(), token=token, option_id=option_id)

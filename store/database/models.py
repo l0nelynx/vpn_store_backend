@@ -163,6 +163,33 @@ class ParamValueMapping(Base):
     )
 
 
+class ProductOptionLabel(Base):
+    """Cached marketplace option/variant names for Parameters UI."""
+
+    __tablename__ = "product_option_labels"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    marketplace: Mapped[str] = mapped_column(String(32))
+    item_id: Mapped[int] = mapped_column(Integer)
+    param_id: Mapped[int] = mapped_column(Integer)
+    user_data_id: Mapped[int] = mapped_column(Integer)
+    item_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    param_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    variant_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "marketplace",
+            "item_id",
+            "param_id",
+            "user_data_id",
+            name="uq_product_option_labels_key",
+        ),
+        Index("ix_product_option_labels_item", "marketplace", "item_id"),
+    )
+
+
 class Product(Base):
     """Cached marketplace catalog row."""
 

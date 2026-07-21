@@ -10,6 +10,7 @@ from store.api.auth import (
     verify_admin,
 )
 from store.services.catalog_sync import sync_all_catalogs
+from store.services.option_sync import sync_product_options
 from store.services.order_sync import sync_all_orders
 from store.settings import secrets
 
@@ -229,3 +230,22 @@ async def admin_delete_param_mapping(record_id: int):
     if not deleted:
         raise HTTPException(status_code=404, detail="Mapping not found")
     return {"status": "deleted"}
+
+
+# ── Product option labels (names from marketplace API v1) ───────────────────
+
+
+@admin_router.post("/sync-product-options", dependencies=[Depends(verify_admin)])
+async def admin_sync_product_options(
+    marketplace: str | None = None,
+    item_id: int | None = None,
+):
+    return await sync_product_options(marketplace=marketplace, item_id=item_id)
+
+
+@admin_router.get("/product-option-labels", dependencies=[Depends(verify_admin)])
+async def admin_list_product_option_labels(
+    marketplace: str | None = None,
+    item_id: int | None = None,
+):
+    return await rq.list_product_option_labels(marketplace=marketplace, item_id=item_id)

@@ -18,9 +18,21 @@ type ValueMapping = {
   value: string;
 };
 
+type OptionLabel = {
+  id: number;
+  marketplace: string;
+  item_id: number;
+  param_id: number;
+  user_data_id: number;
+  item_name: string | null;
+  param_name: string | null;
+  variant_name: string | null;
+};
+
 const TYPES = ["days", "hwid", "location", "internal_sq", "external_sq"];
 const BASE = "/store/api/admin/order-params";
 const MAP_BASE = "/store/api/admin/param-mappings";
+const LABELS_BASE = "/store/api/admin/product-option-labels";
 
 const TYPE_COLORS: Record<string, string> = {
   days: "#3d8bfd",
@@ -30,45 +42,99 @@ const TYPE_COLORS: Record<string, string> = {
   external_sq: "#22d3ee",
 };
 
-type TreeItem = {
-  itemId: number;
-  paramGroups: {
-    paramId: number;
-    userDataGroups: { userDataId: number; params: OrderParam[] }[];
-  }[];
+type Prefill = Partial<Pick<OrderParam, "item_id" | "param_id" | "user_data_id" | "type" | "data">>;
+
+type VariantNode = {
+  userDataId: number;
+  variantName: string | null;
+  params: OrderParam[];
 };
 
-function buildTree(params: OrderParam[]): TreeItem[] {
-  const itemMap = new Map<number, Map<number, Map<number, OrderParam[]>>>();
-  for (const p of params) {
-    if (!itemMap.has(p.item_id)) itemMap.set(p.item_id, new Map());
-    const paramMap = itemMap.get(p.item_id)!;
-    if (!paramMap.has(p.param_id)) paramMap.set(p.param_id, new Map());
-    const udMap = paramMap.get(p.param_id)!;
-    if (!udMap.has(p.user_data_id)) udMap.set(p.user_data_id, []);
-    udMap.get(p.user_data_id)!.push(p);
+type ParamNode = {
+  paramId: number;
+  paramName: string | null;
+  variants: VariantNode[];
+};
+
+type ItemNode = {
+  itemId: number;
+  itemName: string | null;
+  marketplace: string | null;
+  params: ParamNode[];
+};
+
+function labelKey(itemId: number, paramId: number, userDataId: number) {
+  return `${itemId}:${paramId}:${userDataId}`;
+}
+
+function buildMergedTree(params: OrderParam[], labels: OptionLabel[]): ItemNode[] {
+  const itemNames = new Map<number, string | null>();
+  const paramNames = new Map<string, string | null>();
+  const variantNames = new Map<string, string | null>();
+  const markets = new Map<number, string>();
+
+  for (const l of labels) {
+    itemNames.set(l.item_id, l.item_name);
+    markets.set(l.item_id, l.marketplace);
+    paramNames.set(`${l.item_id}:${l.param_id}`, l.param_name);
+    variantNames.set(labelKey(l.item_id, l.param_id, l.user_data_id), l.variant_name);
   }
-  const tree: TreeItem[] = [];
-  for (const [itemId, paramMap] of [...itemMap.entries()].sort((a, b) => a[0] - b[0])) {
-    const paramGroups = [];
-    for (const [paramId, udMap] of [...paramMap.entries()].sort((a, b) => a[0] - b[0])) {
-      const userDataGroups = [];
-      for (const [userDataId, ps] of [...udMap.entries()].sort((a, b) => a[0] - b[0])) {
-        userDataGroups.push({ userDataId, params: ps });
+
+  type UdMap = Map<number, OrderParam[]>;
+  type PMap = Map<number, UdMap>;
+  const itemMap = new Map<number, PMap>();
+
+  function ensure(itemId: number, paramId: number, userDataId: number) {
+    if (!itemMap.has(itemId)) itemMap.set(itemId, new Map());
+    const pm = itemMap.get(itemId)!;
+    if (!pm.has(paramId)) pm.set(paramId, new Map());
+    const um = pm.get(paramId)!;
+    if (!um.has(userDataId)) um.set(userDataId, []);
+    return um.get(userDataId)!;
+  }
+
+  for (const p of params) {
+    ensure(p.item_id, p.param_id, p.user_data_id).push(p);
+  }
+  for (const l of labels) {
+    ensure(l.item_id, l.param_id, l.user_data_id);
+  }
+
+  const tree: ItemNode[] = [];
+  for (const [itemId, pm] of [...itemMap.entries()].sort((a, b) => a[0] - b[0])) {
+    const paramNodes: ParamNode[] = [];
+    for (const [paramId, um] of [...pm.entries()].sort((a, b) => a[0] - b[0])) {
+      const variants: VariantNode[] = [];
+      for (const [userDataId, ps] of [...um.entries()].sort((a, b) => a[0] - b[0])) {
+        variants.push({
+          userDataId,
+          variantName: variantNames.get(labelKey(itemId, paramId, userDataId)) ?? null,
+          params: ps,
+        });
       }
-      paramGroups.push({ paramId, userDataGroups });
+      paramNodes.push({
+        paramId,
+        paramName: paramNames.get(`${itemId}:${paramId}`) ?? null,
+        variants,
+      });
     }
-    tree.push({ itemId, paramGroups });
+    tree.push({
+      itemId,
+      itemName: itemNames.get(itemId) ?? null,
+      marketplace: markets.get(itemId) ?? null,
+      params: paramNodes,
+    });
   }
   return tree;
 }
 
-type Prefill = Partial<Pick<OrderParam, "item_id" | "param_id" | "user_data_id" | "type" | "data">>;
-
 export default function ParametersPage() {
   const [params, setParams] = useState<OrderParam[]>([]);
+  const [labels, setLabels] = useState<OptionLabel[]>([]);
   const [mappings, setMappings] = useState<ValueMapping[]>([]);
   const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+  const [syncing, setSyncing] = useState(false);
   const [filterItemId, setFilterItemId] = useState("");
   const [openItems, setOpenItems] = useState<Set<number>>(new Set());
   const [openParams, setOpenParams] = useState<Set<string>>(new Set());
@@ -86,12 +152,15 @@ export default function ParametersPage() {
   async function load(itemFilter?: string) {
     try {
       const q = itemFilter ? `?item_id=${encodeURIComponent(itemFilter)}` : "";
-      const [p, m] = await Promise.all([
+      const labelQ = itemFilter ? `?item_id=${encodeURIComponent(itemFilter)}` : "";
+      const [p, m, l] = await Promise.all([
         api<OrderParam[]>(`${BASE}${q}`),
         api<ValueMapping[]>(MAP_BASE),
+        api<OptionLabel[]>(`${LABELS_BASE}${labelQ}`),
       ]);
       setParams(p);
       setMappings(m);
+      setLabels(l);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     }
@@ -101,7 +170,7 @@ export default function ParametersPage() {
     load();
   }, []);
 
-  const tree = useMemo(() => buildTree(params), [params]);
+  const tree = useMemo(() => buildMergedTree(params, labels), [params, labels]);
   const optionsForType = useMemo(
     () => mappings.filter((m) => m.type === form.type),
     [mappings, form.type],
@@ -169,6 +238,21 @@ export default function ParametersPage() {
     await load(filterItemId || undefined);
   }
 
+  async function syncOptions() {
+    setSyncing(true);
+    setMsg("");
+    setError("");
+    try {
+      const res = await api<object>("/store/api/admin/sync-product-options", { method: "POST" });
+      setMsg(JSON.stringify(res));
+      await load(filterItemId || undefined);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   function toggleItem(id: number) {
     setOpenItems((prev) => {
       const n = new Set(prev);
@@ -188,7 +272,7 @@ export default function ParametersPage() {
     });
   }
 
-  function labelFor(type: string, value: string) {
+  function mappingLabel(type: string, value: string) {
     const m = mappings.find((x) => x.type === type && x.value === value);
     return m ? m.label : null;
   }
@@ -205,30 +289,43 @@ export default function ParametersPage() {
           style={{ width: 160 }}
         />
         <button onClick={() => load(filterItemId || undefined)}>Filter</button>
+        <button onClick={syncOptions} disabled={syncing}>
+          {syncing ? "Syncing…" : "Sync options from products"}
+        </button>
         <button className="primary" onClick={() => openCreate()}>Add Parameter</button>
       </div>
       <p className="muted">
-        Product option tree. Values can be picked from{" "}
-        <Link to="/value-mappings">Mappings</Link> or entered manually.
+        Tree merges marketplace option names (API v1) with your mappings. Assign values from{" "}
+        <Link to="/value-mappings">Mappings</Link>; manual Add still works.
       </p>
+      {msg && <p className="muted" style={{ wordBreak: "break-all" }}>{msg}</p>}
       {error && <p className="error">{error}</p>}
 
-      {!tree.length && <div className="card muted">No order parameters found</div>}
+      {!tree.length && (
+        <div className="card muted">
+          No parameters or synced options yet — sync catalog, then Sync options.
+        </div>
+      )}
 
       {tree.map((item) => {
-        const totalParams = item.paramGroups.reduce(
-          (s, pg) => s + pg.userDataGroups.reduce((s2, u) => s2 + u.params.length, 0),
+        const mappedCount = item.params.reduce(
+          (s, pg) => s + pg.variants.reduce((s2, v) => s2 + v.params.length, 0),
           0,
         );
+        const variantCount = item.params.reduce((s, pg) => s + pg.variants.length, 0);
         const itemOpen = openItems.has(item.itemId);
+        const itemTitle = item.itemName
+          ? `${item.itemName} (${item.itemId})`
+          : `item_id ${item.itemId}`;
         return (
           <div key={item.itemId} className="tree-node">
             <div className="tree-head" onClick={() => toggleItem(item.itemId)}>
               <span className="tree-caret">{itemOpen ? "▼" : "▶"}</span>
-              <span className="tree-label">item_id</span>
-              <span className="tree-value">{item.itemId}</span>
+              <span className="tree-label">item</span>
+              <span className="tree-value">{itemTitle}</span>
+              {item.marketplace && <span className="tag">{item.marketplace}</span>}
               <span className="muted" style={{ marginLeft: 8 }}>
-                {item.paramGroups.length} options / {totalParams} params
+                {item.params.length} options / {variantCount} variants / {mappedCount} mapped
               </span>
               <button
                 className="tree-add"
@@ -242,18 +339,20 @@ export default function ParametersPage() {
             </div>
             {itemOpen && (
               <div className="tree-children">
-                {item.paramGroups.map((pg) => {
+                {item.params.map((pg) => {
                   const pKey = `${item.itemId}:${pg.paramId}`;
                   const pOpen = openParams.has(pKey);
-                  const pgCount = pg.userDataGroups.reduce((s, u) => s + u.params.length, 0);
+                  const paramTitle = pg.paramName
+                    ? `${pg.paramName} (${pg.paramId})`
+                    : `param_id ${pg.paramId}`;
                   return (
                     <div key={pg.paramId} className="tree-node nested">
                       <div className="tree-head" onClick={() => toggleParam(item.itemId, pg.paramId)}>
                         <span className="tree-caret">{pOpen ? "▼" : "▶"}</span>
-                        <span className="tree-label">param_id</span>
-                        <span className="tree-value">{pg.paramId}</span>
+                        <span className="tree-label">option</span>
+                        <span className="tree-value">{paramTitle}</span>
                         <span className="muted" style={{ marginLeft: 8 }}>
-                          {pg.userDataGroups.length} variants / {pgCount} params
+                          {pg.variants.length} variants
                         </span>
                         <button
                           className="tree-add"
@@ -267,46 +366,56 @@ export default function ParametersPage() {
                       </div>
                       {pOpen && (
                         <div className="tree-children">
-                          {pg.userDataGroups.map((udg) => (
-                            <div key={udg.userDataId} style={{ marginBottom: 8 }}>
-                              <div className="row" style={{ marginBottom: 4 }}>
-                                <span className="tree-label">user_data_id</span>
-                                <span className="tree-value">{udg.userDataId}</span>
-                                <span className="muted">({udg.params.length})</span>
-                                <button
-                                  className="tree-add"
-                                  onClick={() =>
-                                    openCreate({
-                                      item_id: item.itemId,
-                                      param_id: pg.paramId,
-                                      user_data_id: udg.userDataId,
-                                    })
-                                  }
-                                >
-                                  +
-                                </button>
-                              </div>
-                              {udg.params.map((p) => {
-                                const lbl = labelFor(p.type, p.data);
-                                return (
-                                  <div key={p.id} className="param-row">
-                                    <span
-                                      className="tag"
-                                      style={{ background: `${TYPE_COLORS[p.type] || "#666"}33` }}
-                                    >
-                                      {p.type}
-                                    </span>
-                                    <code style={{ flex: 1 }}>
-                                      {lbl ? `${lbl} → ${p.data}` : p.data}
-                                    </code>
-                                    <span className="muted">#{p.id}</span>
-                                    <button onClick={() => openEdit(p)}>Edit</button>
-                                    <button onClick={() => onDelete(p.id)}>Delete</button>
+                          {pg.variants.map((udg) => {
+                            const vTitle = udg.variantName
+                              ? `${udg.variantName} (${udg.userDataId})`
+                              : `user_data_id ${udg.userDataId}`;
+                            return (
+                              <div key={udg.userDataId} style={{ marginBottom: 8 }}>
+                                <div className="row" style={{ marginBottom: 4 }}>
+                                  <span className="tree-label">variant</span>
+                                  <span className="tree-value">{vTitle}</span>
+                                  <span className="muted">({udg.params.length} mapped)</span>
+                                  <button
+                                    className="tree-add"
+                                    onClick={() =>
+                                      openCreate({
+                                        item_id: item.itemId,
+                                        param_id: pg.paramId,
+                                        user_data_id: udg.userDataId,
+                                      })
+                                    }
+                                  >
+                                    {udg.params.length ? "+" : "Assign"}
+                                  </button>
+                                </div>
+                                {udg.params.map((p) => {
+                                  const lbl = mappingLabel(p.type, p.data);
+                                  return (
+                                    <div key={p.id} className="param-row">
+                                      <span
+                                        className="tag"
+                                        style={{ background: `${TYPE_COLORS[p.type] || "#666"}33` }}
+                                      >
+                                        {p.type}
+                                      </span>
+                                      <code style={{ flex: 1 }}>
+                                        {lbl ? `${lbl} → ${p.data}` : p.data}
+                                      </code>
+                                      <span className="muted">#{p.id}</span>
+                                      <button onClick={() => openEdit(p)}>Edit</button>
+                                      <button onClick={() => onDelete(p.id)}>Delete</button>
+                                    </div>
+                                  );
+                                })}
+                                {!udg.params.length && (
+                                  <div className="param-row muted">
+                                    Unmapped — Assign a Mapping value for this variant.
                                   </div>
-                                );
-                              })}
-                            </div>
-                          ))}
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -321,7 +430,7 @@ export default function ParametersPage() {
       {modal && (
         <div className="modal-backdrop" onClick={() => setModal(null)}>
           <form className="card modal stack" onClick={(e) => e.stopPropagation()} onSubmit={onSave}>
-            <h3 style={{ margin: 0 }}>{editing ? "Edit Parameter" : "New Parameter"}</h3>
+            <h3 style={{ margin: 0 }}>{editing ? "Edit Parameter" : "Assign / New Parameter"}</h3>
             <label className="muted">Item ID
               <input required value={form.item_id}
                 onChange={(e) => setForm({ ...form, item_id: e.target.value })} />

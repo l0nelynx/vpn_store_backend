@@ -16,6 +16,7 @@ from store.database.models import (
     OrderParam,
     ParamValueMapping,
     Product,
+    ProductOptionLabel,
     SubscriptionEvent,
     Transaction,
     User,
@@ -856,6 +857,83 @@ async def delete_param_value_mapping(record_id: int) -> bool:
         await session.delete(row)
         await session.commit()
         return True
+
+
+# ── Product option labels (catalog names for Parameters UI) ──────────────────
+
+
+def _option_label_dict(row: ProductOptionLabel) -> dict:
+    return {
+        "id": row.id,
+        "marketplace": row.marketplace,
+        "item_id": row.item_id,
+        "param_id": row.param_id,
+        "user_data_id": row.user_data_id,
+        "item_name": row.item_name,
+        "param_name": row.param_name,
+        "variant_name": row.variant_name,
+        "synced_at": row.synced_at.isoformat() if row.synced_at else None,
+    }
+
+
+async def upsert_product_option_label(
+    *,
+    marketplace: str,
+    item_id: int,
+    param_id: int,
+    user_data_id: int,
+    item_name: str | None = None,
+    param_name: str | None = None,
+    variant_name: str | None = None,
+    session=None,
+) -> ProductOptionLabel:
+    async with get_session(session) as s:
+        row = await s.scalar(
+            select(ProductOptionLabel).where(
+                ProductOptionLabel.marketplace == marketplace,
+                ProductOptionLabel.item_id == item_id,
+                ProductOptionLabel.param_id == param_id,
+                ProductOptionLabel.user_data_id == user_data_id,
+            )
+        )
+        if row is None:
+            row = ProductOptionLabel(
+                marketplace=marketplace,
+                item_id=item_id,
+                param_id=param_id,
+                user_data_id=user_data_id,
+            )
+            s.add(row)
+        row.item_name = item_name
+        row.param_name = param_name
+        row.variant_name = variant_name
+        row.synced_at = datetime.now(timezone.utc)
+        await s.flush()
+        if session is None:
+            await s.commit()
+            await s.refresh(row)
+        return row
+
+
+async def list_product_option_labels(
+    *,
+    marketplace: str | None = None,
+    item_id: int | None = None,
+    session=None,
+) -> list[dict]:
+    async with get_session(session) as s:
+        stmt = select(ProductOptionLabel).order_by(
+            ProductOptionLabel.marketplace,
+            ProductOptionLabel.item_id,
+            ProductOptionLabel.param_id,
+            ProductOptionLabel.user_data_id,
+        )
+        if marketplace:
+            stmt = stmt.where(ProductOptionLabel.marketplace == marketplace)
+        if item_id is not None:
+            stmt = stmt.where(ProductOptionLabel.item_id == item_id)
+        rows = (await s.scalars(stmt)).all()
+        return [_option_label_dict(r) for r in rows]
 
 
 # ── Legacy helpers (kept for migrate script / transitional paths) ───────────
