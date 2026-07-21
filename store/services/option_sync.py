@@ -141,6 +141,11 @@ async def sync_ggsel_options(
     *,
     item_id: int | None = None,
 ) -> dict:
+    """Sync option/variant names via GGsel Seller API v2.
+
+    ``/api/products/options`` on seller.ggsel.com is a different auth gate
+    (``Authentication required``) and does not accept ``ggsel_api_key``.
+    """
     products = await rq.list_products(marketplace="ggsel")
     if item_id is not None:
         products = [p for p in products if p["external_item_id"] == item_id]
@@ -153,6 +158,8 @@ async def sync_ggsel_options(
             "errors": 0,
             "detail": "no ggsel products in DB — sync catalog first",
         }
+
+    from store.api import ggsel_options_v2 as ggsel_v2
 
     ggsel_base = (secrets.get("ggsel_base_url") or "https://seller.ggsel.com").rstrip("/")
     base = (secrets.get("ggsel_options_url") or ggsel_base).rstrip("/")
@@ -167,33 +174,82 @@ async def sync_ggsel_options(
             "detail": "ggsel_api_key not configured",
         }
 
-    # /api/products/options on seller.ggsel.com uses Authorization: <api_key>
-    # (same as Seller API v2). Query ?token= from apilogin is ignored → 401.
-    authorization = str(ggsel_key)
+    api_key = str(ggsel_key)
+    total_opt = total_var = total_err = 0
+    synced_offers = 0
+    auth_failed = False
 
     async with aiohttp.ClientSession() as http:
-        total_opt = total_var = total_err = 0
-        for p in products:
-            r = await _fetch_and_store_product(
-                http,
-                base_url=base,
-                marketplace="ggsel",
-                item_id=p["external_item_id"],
-                item_name=p.get("name"),
-                authorization=authorization,
+        # Auth smoke-test against v2 (different error shape than /api/products/options)
+        offers = await ggsel_v2.list_offers(http, base_url=base, api_key=api_key)
+        if not offers:
+            probe_id = products[0]["external_item_id"]
+            probe = await ggsel_v2.list_offer_options(
+                http, base_url=base, api_key=api_key, offer_id=probe_id
             )
-            total_opt += r["options"]
-            total_var += r["variants"]
-            total_err += r["errors"]
-        return {
-            "marketplace": "ggsel",
-            "products": len(products),
-            "options": total_opt,
-            "variants": total_var,
-            "errors": total_err,
-            "token_source": "ggsel_api_key_authorization",
-            "options_base": base,
-        }
+            # empty list can mean no options OR 401; check logs — if UNAUTHORIZED, fail hard
+            # Re-request to inspect status via a thin wrapper
+            url = f"{base}/api_sellers/v2/offers"
+            async with http.get(
+                url, headers={"Accept": "application/json", "Authorization": api_key}
+            ) as resp:
+                if resp.status in (401, 403):
+                    body = await resp.text()
+                    return {
+                        "marketplace": "ggsel",
+                        "products": len(products),
+                        "options": 0,
+                        "variants": 0,
+                        "errors": 1,
+                        "detail": (
+                            f"GGsel v2 auth failed HTTP {resp.status}: {body[:200]}. "
+                            "Use Seller API key from seller.ggsel.com admin as ggsel_api_key "
+                            "(Authorization header)."
+                        ),
+                        "token_source": "ggsel_api_key_authorization_v2",
+                        "options_base": f"{base}/api_sellers/v2/offers/{{id}}/options",
+                    }
+            # offers list empty but auth OK — fall through using product ids as offer ids
+            _ = probe
+
+        for p in products:
+            oid = p["external_item_id"]
+            try:
+                options = await ggsel_v2.list_offer_options(
+                    http, base_url=base, api_key=api_key, offer_id=oid
+                )
+                if not options:
+                    continue
+                synced_offers += 1
+                pairs = ggsel_v2.iter_option_variants(options)
+                seen_params: set[int] = set()
+                for param_id, pname, user_data_id, vname in pairs:
+                    seen_params.add(param_id)
+                    await rq.upsert_product_option_label(
+                        marketplace="ggsel",
+                        item_id=oid,
+                        param_id=param_id,
+                        user_data_id=user_data_id,
+                        item_name=p.get("name"),
+                        param_name=pname,
+                        variant_name=vname,
+                    )
+                    total_var += 1
+                total_opt += len(seen_params)
+            except Exception as e:
+                total_err += 1
+                logger.error("GGsel v2 option sync offer %s: %s", oid, e)
+
+    return {
+        "marketplace": "ggsel",
+        "products": len(products),
+        "offers_synced": synced_offers,
+        "options": total_opt,
+        "variants": total_var,
+        "errors": total_err,
+        "token_source": "ggsel_api_key_authorization_v2",
+        "options_base": f"{base}/api_sellers/v2/offers/{{id}}/options",
+    }
 
 
 async def sync_product_options(
