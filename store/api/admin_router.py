@@ -179,6 +179,32 @@ async def admin_update_order_param(record_id: int, body: OrderParamUpdate):
     return {"status": "updated"}
 
 
+@admin_router.delete("/order-params/variant", dependencies=[Depends(verify_admin)])
+async def admin_delete_order_param_variant(
+    item_id: int,
+    param_id: int,
+    user_data_id: int,
+    marketplace: str | None = None,
+):
+    """Delete all mapped values for a variant and drop its cached label."""
+    params_deleted = await rq.delete_order_params_for_variant(
+        item_id=item_id, param_id=param_id, user_data_id=user_data_id
+    )
+    labels_deleted = await rq.delete_product_option_labels_for_variant(
+        item_id=item_id,
+        param_id=param_id,
+        user_data_id=user_data_id,
+        marketplace=marketplace,
+    )
+    if params_deleted == 0 and labels_deleted == 0:
+        raise HTTPException(status_code=404, detail="Variant not found")
+    return {
+        "status": "deleted",
+        "order_params": params_deleted,
+        "labels": labels_deleted,
+    }
+
+
 @admin_router.delete("/order-params/{record_id}", dependencies=[Depends(verify_admin)])
 async def admin_delete_order_param(record_id: int):
     deleted = await rq.delete_order_param(record_id)

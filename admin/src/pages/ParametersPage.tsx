@@ -238,6 +238,29 @@ export default function ParametersPage() {
     await load(filterItemId || undefined);
   }
 
+  async function onDeleteVariant(
+    itemId: number,
+    paramId: number,
+    userDataId: number,
+    marketplace: string | null,
+  ) {
+    const label = `variant ${userDataId} (item ${itemId} / option ${paramId})`;
+    if (!confirm(`Delete ${label} and all its mapped values?`)) return;
+    setError("");
+    try {
+      const q = new URLSearchParams({
+        item_id: String(itemId),
+        param_id: String(paramId),
+        user_data_id: String(userDataId),
+      });
+      if (marketplace) q.set("marketplace", marketplace);
+      await api(`${BASE}/variant?${q}`, { method: "DELETE" });
+      await load(filterItemId || undefined);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    }
+  }
+
   async function syncOptions() {
     setSyncing(true);
     setMsg("");
@@ -387,6 +410,18 @@ export default function ParametersPage() {
                                     }
                                   >
                                     {udg.params.length ? "+" : "Assign"}
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      onDeleteVariant(
+                                        item.itemId,
+                                        pg.paramId,
+                                        udg.userDataId,
+                                        item.marketplace,
+                                      )
+                                    }
+                                  >
+                                    Delete
                                   </button>
                                 </div>
                                 {udg.params.map((p) => {

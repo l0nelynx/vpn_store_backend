@@ -803,6 +803,54 @@ async def delete_order_param(record_id: int) -> bool:
         return True
 
 
+async def delete_order_params_for_variant(
+    *,
+    item_id: int,
+    param_id: int,
+    user_data_id: int,
+) -> int:
+    """Delete all OrderParam rows for one marketplace option variant."""
+    async with async_session() as session:
+        rows = (
+            await session.scalars(
+                select(OrderParam).where(
+                    OrderParam.item_id == item_id,
+                    OrderParam.param_id == param_id,
+                    OrderParam.user_data_id == user_data_id,
+                )
+            )
+        ).all()
+        count = len(rows)
+        for row in rows:
+            await session.delete(row)
+        await session.commit()
+        return count
+
+
+async def delete_product_option_labels_for_variant(
+    *,
+    item_id: int,
+    param_id: int,
+    user_data_id: int,
+    marketplace: str | None = None,
+) -> int:
+    """Remove cached label row(s) so the variant leaves the Parameters tree until re-sync."""
+    async with async_session() as session:
+        stmt = select(ProductOptionLabel).where(
+            ProductOptionLabel.item_id == item_id,
+            ProductOptionLabel.param_id == param_id,
+            ProductOptionLabel.user_data_id == user_data_id,
+        )
+        if marketplace:
+            stmt = stmt.where(ProductOptionLabel.marketplace == marketplace)
+        rows = (await session.scalars(stmt)).all()
+        count = len(rows)
+        for row in rows:
+            await session.delete(row)
+        await session.commit()
+        return count
+
+
 # ── Param value mappings (human-readable catalog) ───────────────────────────
 
 
