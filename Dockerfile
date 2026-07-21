@@ -17,6 +17,9 @@ COPY --from=builder /install /usr/local
 COPY ./store ./store
 COPY ./uvicorn ./uvicorn
 COPY ./store_backend.py ./store_backend.py
+COPY ./alembic ./alembic
+COPY ./alembic.ini ./alembic.ini
+COPY ./admin/dist ./admin/dist
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

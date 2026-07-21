@@ -1,20 +1,44 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: store-postgres
+    environment:
+      POSTGRES_USER: store
+      POSTGRES_PASSWORD: store
+      POSTGRES_DB: store
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    networks:
+      - backend-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U store -d store"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend-bot:
     container_name: backend-bot
     build:
       context: .
       dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - type: bind
         source: ./db
         target: /usr/src/app/db
-      - /var/lib/marzban/certs/:/usr/src/app/uvicorn/ssl
       - ./backend.yml:/usr/src/app/backend.yml
+      - ./admin/dist:/usr/src/app/admin/dist:ro
     ports:
-       - '127.0.0.1:5001:5001'
+      - "127.0.0.1:5001:5001"
     networks:
       - backend-network
     restart: unless-stopped
+
 networks:
   backend-network:
     name: backend-network

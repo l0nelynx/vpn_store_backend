@@ -155,6 +155,37 @@ async def create_user(
         return None
 
 
+async def extend_user(user_uuid: str, days: int):
+    """Extend subscription: new expire = max(now, current_expire) + days."""
+    try:
+        remnawave = get_sdk()
+        current: UserResponseDto = await remnawave.users.get_user_by_uuid(user_uuid)
+        if not current:
+            return None
+        now = datetime.datetime.now(datetime.timezone.utc)
+        base = current.expire_at
+        if base.tzinfo is None:
+            base = base.replace(tzinfo=datetime.timezone.utc)
+        if base < now:
+            base = now
+        new_expire = base + datetime.timedelta(days=days)
+        user = UpdateUserRequestDto(
+            uuid=uuid.UUID(str(user_uuid)),
+            expire_at=new_expire,
+            status=UserStatus.ACTIVE,
+        )
+        response: UserResponseDto = await remnawave.users.update_user(user)
+        return {
+            "uuid": response.uuid,
+            "expire": int(response.expire_at.timestamp()),
+            "subscription_url": response.subscription_url,
+            "status": "active" if response.status == UserStatus.ACTIVE else "inactive",
+        }
+    except Exception as e:
+        logger.error("Error extending user %s in RemnaWave: %s", user_uuid, e)
+        return None
+
+
 async def update_user(
     user_uuid: str,
     username: str = None,

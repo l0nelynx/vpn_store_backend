@@ -1,0 +1,38 @@
+# Copy to backend.yml and fill secrets.
+# database_url: leave empty / omit for SQLite at db/backend_db.sqlite3
+
+backend_bot_token: ""
+admin_id: 0
+tg_bot_username: ""
+
+uvicorn_host: "0.0.0.0"
+uvicorn_port: 5001
+
+api_token: "change-me"
+admin_password: "change-me"
+
+# Postgres (recommended). Example for docker-compose:
+# database_url: "postgresql+asyncpg://store:store@postgres:5432/store"
+# Local SQLite default if omitted:
+# database_url: "sqlite+aiosqlite:///db/backend_db.sqlite3"
+
+remnawave_url: ""
+remnawave_token: ""
+rw_free_id: ""
+rw_france_id: ""
+rw_germany_id: ""
+rw_premium_id: ""
+
+dig_pass: ""
+dig_seller_id: ""
+dig_api_key: ""
+dig_url: "https://api.digiseller.com"
+
+ggsel_seller_id: ""
+ggsel_api_key: ""
+ggsel_base_url: "https://seller.ggsel.com"
+ggsel_check_interval: 1
+ggsel_top_value: 10
+ggsel_request_retries: 3
+ggsel_retry_timeout: 5
+ggsel_error_threshold: 5

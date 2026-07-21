@@ -1,23 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 import store.database.requests as rq
-from store.settings import secrets
-
-_bearer_scheme = HTTPBearer()
-
-
-async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme)):
-    if credentials.credentials != secrets.get("api_token"):
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return credentials
-
+from store.api.auth import verify_api_token
 
 order_params_router = APIRouter(
     prefix="/store/api/order-params",
     tags=["order-params"],
-    dependencies=[Depends(verify_token)],
+    dependencies=[Depends(verify_api_token)],
 )
 
 
@@ -59,8 +49,6 @@ async def update_order_param(record_id: int, body: OrderParamUpdate):
     fields = body.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
-    if "type" in fields:
-        fields["type"] = fields.pop("type")
     updated = await rq.update_order_param(record_id, **fields)
     if not updated:
         raise HTTPException(status_code=404, detail="OrderParam not found")
