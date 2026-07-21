@@ -102,7 +102,7 @@ async def get_user_from_username(username: str):
         expire_timestamp = int(response.expire_at.timestamp())
 
         return {
-            "uuid": response.uuid,
+            "uuid": str(response.uuid),
             "expire": expire_timestamp,
             "subscription_url": response.subscription_url,
             "status": "active" if response.status == UserStatus.ACTIVE else "inactive",
@@ -174,7 +174,7 @@ async def create_user(
         expire_timestamp = int(response.expire_at.timestamp())
 
         return {
-            "uuid": response.uuid,
+            "uuid": str(response.uuid),
             "expire": expire_timestamp,
             "subscription_url": response.subscription_url,
             "status": "active",
@@ -189,7 +189,8 @@ async def extend_user(user_uuid: str, days: int):
     """Extend subscription: new expire = max(now, current_expire) + days."""
     try:
         remnawave = get_sdk()
-        current: UserResponseDto = await remnawave.users.get_user_by_uuid(user_uuid)
+        uid = str(user_uuid)
+        current: UserResponseDto = await remnawave.users.get_user_by_uuid(uid)
         if not current:
             return None
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -200,19 +201,19 @@ async def extend_user(user_uuid: str, days: int):
             base = now
         new_expire = base + datetime.timedelta(days=days)
         user = UpdateUserRequestDto(
-            uuid=uuid.UUID(str(user_uuid)),
+            uuid=uuid.UUID(uid),
             expire_at=new_expire,
             status=UserStatus.ACTIVE,
         )
         response: UserResponseDto = await remnawave.users.update_user(user)
         return {
-            "uuid": response.uuid,
+            "uuid": str(response.uuid),
             "expire": int(response.expire_at.timestamp()),
             "subscription_url": response.subscription_url,
             "status": "active" if response.status == UserStatus.ACTIVE else "inactive",
         }
     except Exception as e:
-        _log_rw_error("extend_user", user_uuid, e)
+        _log_rw_error("extend_user", str(user_uuid), e)
         return None
 
 

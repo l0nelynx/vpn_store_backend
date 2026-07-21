@@ -198,8 +198,13 @@ async def fulfill_ggsel_order(
     if not result.get("sub"):
         return result
 
-    existing = await rq.get_order_by_external("ggsel", str(content_id), session=db_session)
-    if existing and existing.delivery_status == 1 and result.get("event") == "existing":
+    # Never spam: only notify buyer on brand-new provision (or explicit resend).
+    if not result.get("should_notify_buyer"):
+        logger.info(
+            "Skip buyer message for %s event=%s",
+            content_id,
+            result.get("event"),
+        )
         return result
 
     delivery_status = await send_message(
