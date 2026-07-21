@@ -139,8 +139,12 @@ async def list_product_options(
 ) -> list[dict]:
     from store.api.options_v1 import list_product_options as _list
 
+    # GGsel /api/products/options expects Authorization: api_key (not apilogin ?token=)
     return await _list(
-        session, base_url=_ggsel_options_base_url(), token=token, product_id=product_id
+        session,
+        base_url=_ggsel_options_base_url(),
+        product_id=product_id,
+        authorization=str(secrets.get("ggsel_api_key") or ""),
     )
 
 
@@ -150,7 +154,10 @@ async def get_product_option(
     from store.api.options_v1 import get_product_option as _get
 
     return await _get(
-        session, base_url=_ggsel_options_base_url(), token=token, option_id=option_id
+        session,
+        base_url=_ggsel_options_base_url(),
+        option_id=option_id,
+        authorization=str(secrets.get("ggsel_api_key") or ""),
     )
 
 

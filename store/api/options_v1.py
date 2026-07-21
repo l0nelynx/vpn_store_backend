@@ -1,4 +1,4 @@
-"""Digiseller / GGsel Seller API v1 product options helpers."""
+"""GGsel / Digiseller Seller API v1 product options helpers."""
 
 from __future__ import annotations
 
@@ -34,16 +34,31 @@ def localized_name(name_field: Any, prefer: str = "ru-RU") -> str | None:
     return preferred or first
 
 
+def _auth_headers(*, authorization: str | None = None) -> dict[str, str]:
+    headers = {"Accept": "application/json"}
+    if authorization:
+        headers["Authorization"] = authorization
+    return headers
+
+
 async def list_product_options(
     session: aiohttp.ClientSession,
     *,
     base_url: str,
-    token: str,
     product_id: int,
+    token: str | None = None,
+    authorization: str | None = None,
 ) -> list[dict]:
-    """GET /api/products/options/list/{product_id} — v1."""
-    url = f"{base_url.rstrip('/')}/api/products/options/list/{int(product_id)}?token={token}"
-    async with session.get(url, headers={"Accept": "application/json"}) as resp:
+    """GET /api/products/options/list/{product_id} — v1.
+
+    Digiseller: pass ``token`` as query param.
+    GGsel: pass seller API key via ``Authorization`` header
+    (query ``token`` alone → 401 Authentication required).
+    """
+    base = base_url.rstrip("/")
+    qs = f"?token={token}" if token else ""
+    url = f"{base}/api/products/options/list/{int(product_id)}{qs}"
+    async with session.get(url, headers=_auth_headers(authorization=authorization)) as resp:
         if resp.status != 200:
             body = await resp.text()
             logger.warning(
@@ -64,12 +79,15 @@ async def get_product_option(
     session: aiohttp.ClientSession,
     *,
     base_url: str,
-    token: str,
     option_id: int,
+    token: str | None = None,
+    authorization: str | None = None,
 ) -> dict | None:
     """GET /api/products/options/{option_id} — v1 (includes variants)."""
-    url = f"{base_url.rstrip('/')}/api/products/options/{int(option_id)}?token={token}"
-    async with session.get(url, headers={"Accept": "application/json"}) as resp:
+    base = base_url.rstrip("/")
+    qs = f"?token={token}" if token else ""
+    url = f"{base}/api/products/options/{int(option_id)}{qs}"
+    async with session.get(url, headers=_auth_headers(authorization=authorization)) as resp:
         if resp.status != 200:
             body = await resp.text()
             logger.warning(

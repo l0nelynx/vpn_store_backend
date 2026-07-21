@@ -2,11 +2,12 @@
 
 Runtime option sync in Store:
 
-- **GGsel**: Seller API v1 on `ggsel_base_url` (default `https://seller.ggsel.com`)
-  - token: `POST /api_sellers/api/apilogin` with `ggsel_seller_id` / `ggsel_api_key`
-  - `GET /api/products/options/list/{product_id}?token=`
-  - `GET /api/products/options/{option_id}?token=`
-- **Digiseller** (separate marketplace): Digiseller host `dig_url` + `dig_seller_id` / `dig_api_key`
+- **GGsel**: on `ggsel_base_url` (`https://seller.ggsel.com`)
+  - `GET /api/products/options/list/{product_id}`
+  - `GET /api/products/options/{option_id}`
+  - Auth: header `Authorization: <ggsel_api_key>` (seller admin API key).
+    Query `?token=` from apilogin is **not** accepted here → 401.
+- **Digiseller**: on `dig_url` with `?token=` from Digiseller `apilogin`
 
 See `store/api/options_v1.py` and `store/services/option_sync.py`.
 

@@ -19,17 +19,22 @@ async def _fetch_and_store_product(
     session: aiohttp.ClientSession,
     *,
     base_url: str,
-    token: str,
     marketplace: str,
     item_id: int,
     item_name: str | None,
+    token: str | None = None,
+    authorization: str | None = None,
 ) -> dict:
     options = 0
     variants = 0
     errors = 0
     try:
         opt_list = await list_product_options(
-            session, base_url=base_url, token=token, product_id=item_id
+            session,
+            base_url=base_url,
+            product_id=item_id,
+            token=token,
+            authorization=authorization,
         )
     except Exception as e:
         logger.error("list options %s/%s: %s", marketplace, item_id, e)
@@ -43,11 +48,14 @@ async def _fetch_and_store_product(
             param_id = int(oid)
             param_name = localized_name(opt.get("name"))
             detail = await get_product_option(
-                session, base_url=base_url, token=token, option_id=param_id
+                session,
+                base_url=base_url,
+                option_id=param_id,
+                token=token,
+                authorization=authorization,
             )
             variants_raw = (detail or {}).get("variants") or []
             if not variants_raw and detail is None:
-                # list-only fallback: no variants known
                 continue
             options += 1
             if not param_name and detail:
@@ -147,41 +155,21 @@ async def sync_ggsel_options(
         }
 
     ggsel_base = (secrets.get("ggsel_base_url") or "https://seller.ggsel.com").rstrip("/")
-    # Options v1 on the same GGsel seller host: /api/products/options/...
     base = (secrets.get("ggsel_options_url") or ggsel_base).rstrip("/")
-    ggsel_seller = secrets.get("ggsel_seller_id")
     ggsel_key = secrets.get("ggsel_api_key")
-    if not ggsel_seller or not ggsel_key:
+    if not ggsel_key:
         return {
             "marketplace": "ggsel",
             "products": 0,
             "options": 0,
             "variants": 0,
             "errors": 1,
-            "detail": "ggsel_seller_id / ggsel_api_key not configured",
+            "detail": "ggsel_api_key not configured",
         }
 
-    async with aiohttp.ClientSession(base_url=ggsel_base) as ghttp:
-        try:
-            token = await ggsel.get_token(ghttp)
-        except Exception as e:
-            return {
-                "marketplace": "ggsel",
-                "products": 0,
-                "options": 0,
-                "variants": 0,
-                "errors": 1,
-                "detail": f"ggsel apilogin failed: {e}",
-            }
-    if not token:
-        return {
-            "marketplace": "ggsel",
-            "products": 0,
-            "options": 0,
-            "variants": 0,
-            "errors": 1,
-            "detail": "ggsel apilogin returned empty token",
-        }
+    # /api/products/options on seller.ggsel.com uses Authorization: <api_key>
+    # (same as Seller API v2). Query ?token= from apilogin is ignored → 401.
+    authorization = str(ggsel_key)
 
     async with aiohttp.ClientSession() as http:
         total_opt = total_var = total_err = 0
@@ -189,10 +177,10 @@ async def sync_ggsel_options(
             r = await _fetch_and_store_product(
                 http,
                 base_url=base,
-                token=token,
                 marketplace="ggsel",
                 item_id=p["external_item_id"],
                 item_name=p.get("name"),
+                authorization=authorization,
             )
             total_opt += r["options"]
             total_var += r["variants"]
@@ -203,7 +191,7 @@ async def sync_ggsel_options(
             "options": total_opt,
             "variants": total_var,
             "errors": total_err,
-            "token_source": "ggsel_seller_apilogin",
+            "token_source": "ggsel_api_key_authorization",
             "options_base": base,
         }
 
