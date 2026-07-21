@@ -225,7 +225,7 @@ class Transaction(Base):
     __table_args__ = (Index("ix_transaction_user_id", "user_id"),)
 
 
-async def _ensure_sqlite_columns(connection) -> None:
+def _ensure_sqlite_columns(connection) -> None:
     """create_all does not ALTER existing tables — patch known new columns."""
     if not str(engine.url).startswith("sqlite"):
         return
