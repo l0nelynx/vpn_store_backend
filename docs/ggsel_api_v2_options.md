@@ -1,9 +1,12 @@
 # GGsel Seller API v2 — product options (future)
 
-Runtime option sync in Store uses **Seller API v1** (Digiseller-compatible):
+Runtime option sync in Store:
 
-- Paths under `/api/products/options/...`
-- Auth: Digiseller `apilogin` on `dig_url` / `ggsel_options_url` using **`ggsel_seller_id` + `ggsel_api_key`** (not `dig_seller_*` — that only sees Digiseller-owned products)
+- **GGsel**: Seller API v1 on `ggsel_base_url` (default `https://seller.ggsel.com`)
+  - token: `POST /api_sellers/api/apilogin` with `ggsel_seller_id` / `ggsel_api_key`
+  - `GET /api/products/options/list/{product_id}?token=`
+  - `GET /api/products/options/{option_id}?token=`
+- **Digiseller** (separate marketplace): Digiseller host `dig_url` + `dig_seller_id` / `dig_api_key`
 
 See `store/api/options_v1.py` and `store/services/option_sync.py`.
 

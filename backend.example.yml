@@ -35,8 +35,8 @@ dig_url: "https://api.digiseller.com"
 ggsel_seller_id: ""
 ggsel_api_key: ""
 ggsel_base_url: "https://seller.ggsel.com"
-# Optional override for Digiseller-compatible options API host (default: dig_url)
-# ggsel_options_url: "https://api.digiseller.com"
+# Optional override for GGsel product options API host (default: ggsel_base_url)
+# ggsel_options_url: "https://seller.ggsel.com"
 ggsel_check_interval: 1
 ggsel_top_value: 50
 ggsel_request_retries: 3
