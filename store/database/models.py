@@ -225,6 +225,23 @@ class Transaction(Base):
     __table_args__ = (Index("ix_transaction_user_id", "user_id"),)
 
 
+async def _ensure_sqlite_columns(connection) -> None:
+    """create_all does not ALTER existing tables — patch known new columns."""
+    if not str(engine.url).startswith("sqlite"):
+        return
+    from sqlalchemy import text
+
+    rows = connection.execute(text("PRAGMA table_info(order_params)")).fetchall()
+    if not rows:
+        return
+    cols = {r[1] for r in rows}
+    if "marketplace" not in cols:
+        connection.execute(
+            text("ALTER TABLE order_params ADD COLUMN marketplace VARCHAR(32)")
+        )
+
+
 async def async_main():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_sqlite_columns)
