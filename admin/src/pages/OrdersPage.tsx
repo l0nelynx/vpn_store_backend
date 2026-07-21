@@ -20,7 +20,11 @@ const PAGE_SIZE = 50;
 
 export default function OrdersPage() {
   const [email, setEmail] = useState("");
+  const [orderQ, setOrderQ] = useState("");
   const [marketplace, setMarketplace] = useState("");
+  const [sort, setSort] = useState("created_at");
+  const [orderDir, setOrderDir] = useState("desc");
+  const [top, setTop] = useState(100);
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -33,7 +37,10 @@ export default function OrdersPage() {
     try {
       const q = new URLSearchParams();
       if (email) q.set("email", email);
+      if (orderQ.trim()) q.set("q", orderQ.trim());
       if (marketplace) q.set("marketplace", marketplace);
+      q.set("sort", sort);
+      q.set("order", orderDir);
       q.set("limit", String(PAGE_SIZE));
       q.set("offset", String(p * PAGE_SIZE));
       const res = await api<{ items: Order[]; total: number }>(
@@ -48,7 +55,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     search(page);
-  }, [page]);
+  }, [page, sort, orderDir]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -57,12 +64,14 @@ export default function OrdersPage() {
   }
 
   async function syncSales() {
+    const n = Math.min(200, Math.max(1, Number(top) || 100));
+    setTop(n);
     setSyncing(true);
     setMsg("");
     setError("");
     try {
       const res = await api<{ ggsel: object; digiseller: object }>(
-        "/store/api/admin/sync-orders?top=100",
+        `/store/api/admin/sync-orders?top=${n}`,
         { method: "POST" },
       );
       setMsg(JSON.stringify(res));
@@ -80,24 +89,52 @@ export default function OrdersPage() {
     <div>
       <div className="row" style={{ marginBottom: "1rem" }}>
         <h2 style={{ margin: 0, flex: 1 }}>Orders</h2>
+        <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          top
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={top}
+            onChange={(e) => setTop(Number(e.target.value))}
+            style={{ width: 72 }}
+          />
+        </label>
         <button className="primary" onClick={syncSales} disabled={syncing}>
-          {syncing ? "Syncing…" : "Sync sales (top 100)"}
+          {syncing ? "Syncing…" : `Sync sales (top ${top})`}
         </button>
       </div>
       <p className="muted">
-        Remnawave lookups during sync use <code>/api/users/stream</code> (bulk), not per-user GETs.
+        Already-delivered orders are skipped via a batch DB lookup before marketplace detail /
+        Remnawave stream. Lookups use <code>/api/users/stream</code>.
       </p>
       <form className="card row" onSubmit={onSubmit}>
         <input
           placeholder="Filter by email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          style={{ flex: 1, minWidth: 180 }}
+          style={{ flex: 1, minWidth: 140 }}
+        />
+        <input
+          placeholder="Order / invoice #"
+          value={orderQ}
+          onChange={(e) => setOrderQ(e.target.value)}
+          style={{ flex: 1, minWidth: 140 }}
         />
         <select value={marketplace} onChange={(e) => setMarketplace(e.target.value)}>
           <option value="">all markets</option>
           <option value="ggsel">ggsel</option>
           <option value="digiseller">digiseller</option>
+        </select>
+        <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(0); }}>
+          <option value="created_at">sort: created</option>
+          <option value="external_order_id">sort: order id</option>
+          <option value="marketplace">sort: market</option>
+          <option value="delivery_status">sort: delivery</option>
+        </select>
+        <select value={orderDir} onChange={(e) => { setOrderDir(e.target.value); setPage(0); }}>
+          <option value="desc">desc</option>
+          <option value="asc">asc</option>
         </select>
         <button className="primary" type="submit">Search</button>
       </form>

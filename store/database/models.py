@@ -146,6 +146,23 @@ class OrderParam(Base):
     )
 
 
+class ParamValueMapping(Base):
+    """Human-readable catalog of parameter values (label → technical value)."""
+
+    __tablename__ = "param_value_mappings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    type: Mapped[str] = mapped_column(String(50))
+    label: Mapped[str] = mapped_column(String(200))
+    value: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("type", "value", name="uq_param_value_mappings_type_value"),
+        Index("ix_param_value_mappings_type", "type"),
+    )
+
+
 class Product(Base):
     """Cached marketplace catalog row."""
 

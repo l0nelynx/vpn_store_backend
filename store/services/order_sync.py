@@ -19,16 +19,45 @@ logger = logging.getLogger(__name__)
 async def sync_ggsel_orders(top: int = 50) -> dict:
     base = secrets.get("ggsel_base_url") or "https://seller.ggsel.com"
     adopted = created = skipped = errors = 0
+    rw_cache: dict = {}
     async with aiohttp.ClientSession(base_url=base) as http:
         token = await ggsel.get_token(http)
         last = await ggsel.return_last_sales(http, top=top, token=token)
         sales = last.get("sales") or []
 
-        # Prefetch order details, then one Remnawave stream for all usernames
+        # Batch-skip already delivered by invoice_id / content_id before get_order_info
+        invoice_ids = []
+        external_ids = []
+        for sale in sales:
+            inv = sale.get("invoice_id") or sale.get("inv")
+            if inv is not None:
+                invoice_ids.append(str(inv))
+            cid = sale.get("content_id") or sale.get("id_i")
+            if cid is not None:
+                external_ids.append(str(cid))
+
+        by_inv = await rq.get_orders_by_invoice_ids("ggsel", invoice_ids)
+        by_ext = await rq.get_orders_by_externals("ggsel", external_ids)
+
         prepared = []
         for sale in sales:
             try:
-                order_info = await ggsel.get_order_info(http, sale["invoice_id"], token)
+                inv = sale.get("invoice_id") or sale.get("inv")
+                cid = sale.get("content_id") or sale.get("id_i")
+                existing = None
+                if inv is not None:
+                    existing = by_inv.get(str(inv))
+                if existing is None and cid is not None:
+                    existing = by_ext.get(str(cid))
+                if existing and existing.delivery_status == 1:
+                    skipped += 1
+                    continue
+
+                if inv is None:
+                    skipped += 1
+                    continue
+
+                order_info = await ggsel.get_order_info(http, int(inv), token)
                 content = order_info.get("content") or {}
                 content_id = content.get("content_id")
                 if content_id is None:
@@ -38,12 +67,15 @@ async def sync_ggsel_orders(top: int = 50) -> dict:
                 if state is not None and not (3 <= int(state) <= 4):
                     skipped += 1
                     continue
-                existing = await rq.get_order_by_external("ggsel", str(content_id))
+
+                # Re-check after detail fetch (content_id is canonical external id)
+                existing = by_ext.get(str(content_id)) or await rq.get_order_by_external(
+                    "ggsel", str(content_id)
+                )
                 if existing and existing.delivery_status == 1:
-                    # Still verify RW via cache later only if we want recreate —
-                    # for sync adopt path skip already-delivered.
                     skipped += 1
                     continue
+
                 prepared.append(content)
             except Exception as e:
                 errors += 1
@@ -118,13 +150,21 @@ async def sync_digiseller_orders(top: int = 50) -> dict:
                 "detail": "dig_seller_id / dig_api_key not configured",
             }
         sales = await dig.list_last_sales(http, token, top=top)
+
+        ext_ids = []
+        for sale in sales:
+            inv = sale.get("invoice_id") or sale.get("inv") or sale.get("id_i")
+            if inv is not None:
+                ext_ids.append(str(inv))
+        by_ext = await rq.get_orders_by_externals("digiseller", ext_ids)
+
         prepared = []
         for sale in sales:
             inv = sale.get("invoice_id") or sale.get("inv") or sale.get("id_i")
             if inv is None:
                 skipped += 1
                 continue
-            existing = await rq.get_order_by_external("digiseller", str(inv))
+            existing = by_ext.get(str(inv))
             if existing and existing.delivery_status == 1:
                 skipped += 1
                 continue

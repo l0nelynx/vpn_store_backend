@@ -31,9 +31,11 @@ async def parse_order_params(
         result.update(params)
     days = result.get("days")
     hwid = result.get("hwid")
+    # Prefer explicit internal_sq; location remains a legacy alias.
+    template = result.get("internal_sq") or result.get("location")
     return {
         "days": int(days) if days is not None else None,
-        "template": result.get("location") or result.get("internal_sq"),
+        "template": template,
         "hwid": int(hwid) if hwid is not None else None,
         "outer_squad": result.get("external_sq"),
     }

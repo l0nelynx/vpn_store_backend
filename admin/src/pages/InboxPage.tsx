@@ -33,6 +33,10 @@ export default function InboxPage() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
+  const [q, setQ] = useState("");
+  const [marketplace, setMarketplace] = useState("");
+  const [sort, setSort] = useState("last_at");
+  const [orderDir, setOrderDir] = useState("desc");
   const [customerId, setCustomerId] = useState<number | null>(
     initialCustomer ? Number(initialCustomer) : null,
   );
@@ -44,8 +48,15 @@ export default function InboxPage() {
 
   async function loadThreads(p = page) {
     const offset = p * PAGE_SIZE;
+    const qs = new URLSearchParams();
+    qs.set("limit", String(PAGE_SIZE));
+    qs.set("offset", String(offset));
+    if (q.trim()) qs.set("q", q.trim());
+    if (marketplace) qs.set("marketplace", marketplace);
+    qs.set("sort", sort);
+    qs.set("order", orderDir);
     const res = await api<{ items: Thread[]; total: number }>(
-      `/store/api/messages/inbox?limit=${PAGE_SIZE}&offset=${offset}`,
+      `/store/api/messages/inbox?${qs}`,
     );
     setThreads(res.items);
     setTotal(res.total);
@@ -53,7 +64,7 @@ export default function InboxPage() {
 
   useEffect(() => {
     loadThreads(page).catch((e) => setError(e instanceof Error ? e.message : "Failed"));
-  }, [page]);
+  }, [page, marketplace, sort, orderDir]);
 
   useEffect(() => {
     if (!customerId) return;
@@ -75,6 +86,16 @@ export default function InboxPage() {
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  async function onFilter(e: FormEvent) {
+    e.preventDefault();
+    setPage(0);
+    try {
+      await loadThreads(0);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed");
+    }
+  }
+
   async function send(e: FormEvent) {
     e.preventDefault();
     if (!orderId || !text.trim()) return;
@@ -95,6 +116,29 @@ export default function InboxPage() {
     <div>
       <h2>Inbox</h2>
       {error && <p className="error">{error}</p>}
+      <form className="card row" onSubmit={onFilter} style={{ marginBottom: "0.75rem" }}>
+        <input
+          placeholder="Search email / order #"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{ flex: 1, minWidth: 160 }}
+        />
+        <select value={marketplace} onChange={(e) => { setMarketplace(e.target.value); setPage(0); }}>
+          <option value="">all markets</option>
+          <option value="ggsel">ggsel</option>
+          <option value="digiseller">digiseller</option>
+        </select>
+        <select value={sort} onChange={(e) => { setSort(e.target.value); setPage(0); }}>
+          <option value="last_at">sort: last activity</option>
+          <option value="email">sort: email</option>
+          <option value="order_count">sort: order count</option>
+        </select>
+        <select value={orderDir} onChange={(e) => { setOrderDir(e.target.value); setPage(0); }}>
+          <option value="desc">desc</option>
+          <option value="asc">asc</option>
+        </select>
+        <button className="primary" type="submit">Search</button>
+      </form>
       <div className="row" style={{ alignItems: "stretch" }}>
         <div className="card" style={{ width: 300 }}>
           {threads.map((t) => (

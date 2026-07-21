@@ -42,6 +42,18 @@ class OrderParamUpdate(BaseModel):
     data: str | None = None
 
 
+class ParamMappingCreate(BaseModel):
+    type: str
+    label: str
+    value: str
+
+
+class ParamMappingUpdate(BaseModel):
+    type: str | None = None
+    label: str | None = None
+    value: str | None = None
+
+
 @admin_router.post("/login")
 async def login(body: LoginBody):
     if not check_admin_password(body.username.strip(), body.password):
@@ -90,6 +102,9 @@ async def orders(
     remnawave_uuid: str | None = None,
     remnawave_username: str | None = None,
     external_order_id: str | None = None,
+    q: str | None = None,
+    sort: str = Query("created_at"),
+    order: str = Query("desc"),
     limit: int = Query(50, le=500),
     offset: int = 0,
 ):
@@ -99,10 +114,20 @@ async def orders(
         remnawave_uuid=remnawave_uuid,
         remnawave_username=remnawave_username,
         external_order_id=external_order_id,
+        q=q,
+        sort=sort,
+        order=order,
         limit=limit,
         offset=offset,
     )
-    total = await rq.count_orders(email=email, marketplace=marketplace)
+    total = await rq.count_orders(
+        email=email,
+        marketplace=marketplace,
+        remnawave_uuid=remnawave_uuid,
+        remnawave_username=remnawave_username,
+        external_order_id=external_order_id,
+        q=q,
+    )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
@@ -158,4 +183,49 @@ async def admin_delete_order_param(record_id: int):
     deleted = await rq.delete_order_param(record_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="OrderParam not found")
+    return {"status": "deleted"}
+
+
+# ── Param value mappings (label catalog for Parameters dropdown) ────────────
+
+
+@admin_router.get("/param-mappings", dependencies=[Depends(verify_admin)])
+async def admin_list_param_mappings(type: str | None = None):
+    return await rq.list_param_value_mappings(type_=type)
+
+
+@admin_router.post("/param-mappings", status_code=201, dependencies=[Depends(verify_admin)])
+async def admin_create_param_mapping(body: ParamMappingCreate):
+    try:
+        return await rq.create_param_value_mapping(
+            type_=body.type.strip(),
+            label=body.label.strip(),
+            value=body.value.strip(),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@admin_router.put("/param-mappings/{record_id}", dependencies=[Depends(verify_admin)])
+async def admin_update_param_mapping(record_id: int, body: ParamMappingUpdate):
+    fields = body.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if "type" in fields and fields["type"] is not None:
+        fields["type"] = fields["type"].strip()
+    if "label" in fields and fields["label"] is not None:
+        fields["label"] = fields["label"].strip()
+    if "value" in fields and fields["value"] is not None:
+        fields["value"] = fields["value"].strip()
+    updated = await rq.update_param_value_mapping(record_id, **fields)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return updated
+
+
+@admin_router.delete("/param-mappings/{record_id}", dependencies=[Depends(verify_admin)])
+async def admin_delete_param_mapping(record_id: int):
+    deleted = await rq.delete_param_value_mapping(record_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Mapping not found")
     return {"status": "deleted"}

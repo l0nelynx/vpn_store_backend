@@ -14,6 +14,7 @@ from store.database.models import (
     Message,
     Order,
     OrderParam,
+    ParamValueMapping,
     Product,
     SubscriptionEvent,
     Transaction,
@@ -105,6 +106,44 @@ async def get_order_by_external(
         )
 
 
+async def get_orders_by_externals(
+    marketplace: str, external_order_ids: list[str], session=None
+) -> dict[str, Order]:
+    """Batch load orders keyed by external_order_id."""
+    ids = [str(x) for x in external_order_ids if x is not None and str(x)]
+    if not ids:
+        return {}
+    async with get_session(session) as s:
+        rows = (
+            await s.scalars(
+                select(Order).where(
+                    Order.marketplace == marketplace,
+                    Order.external_order_id.in_(ids),
+                )
+            )
+        ).all()
+        return {o.external_order_id: o for o in rows}
+
+
+async def get_orders_by_invoice_ids(
+    marketplace: str, invoice_ids: list[str], session=None
+) -> dict[str, Order]:
+    """Batch load orders keyed by invoice_id."""
+    ids = [str(x) for x in invoice_ids if x is not None and str(x)]
+    if not ids:
+        return {}
+    async with get_session(session) as s:
+        rows = (
+            await s.scalars(
+                select(Order).where(
+                    Order.marketplace == marketplace,
+                    Order.invoice_id.in_(ids),
+                )
+            )
+        ).all()
+        return {str(o.invoice_id): o for o in rows if o.invoice_id}
+
+
 async def create_order(
     *,
     marketplace: str,
@@ -184,6 +223,55 @@ async def add_subscription_event(
         return ev
 
 
+def _orders_filter_stmt(
+    *,
+    email: str | None = None,
+    marketplace: str | None = None,
+    remnawave_uuid: str | None = None,
+    remnawave_username: str | None = None,
+    external_order_id: str | None = None,
+    q: str | None = None,
+):
+    stmt = select(Order, Customer).outerjoin(Customer, Customer.id == Order.customer_id)
+    if email:
+        norm = normalize_email(email) or email.strip().lower()
+        stmt = stmt.where(Customer.email_normalized == norm)
+    if marketplace:
+        stmt = stmt.where(Order.marketplace == marketplace)
+    if remnawave_uuid:
+        stmt = stmt.where(Order.remnawave_uuid == remnawave_uuid)
+    if remnawave_username:
+        stmt = stmt.where(Order.remnawave_username == remnawave_username)
+    if external_order_id:
+        oid = str(external_order_id)
+        stmt = stmt.where(
+            or_(Order.external_order_id == oid, Order.invoice_id == oid)
+        )
+    if q:
+        qq = q.strip()
+        if qq:
+            like = f"%{qq}%"
+            stmt = stmt.where(
+                or_(
+                    Order.external_order_id == qq,
+                    Order.invoice_id == qq,
+                    Order.external_order_id.ilike(like),
+                    Order.invoice_id.ilike(like),
+                    Customer.email.ilike(like),
+                    Customer.email_normalized.ilike(like),
+                )
+            )
+    return stmt
+
+
+_ORDER_SORT_COLS = {
+    "created_at": Order.created_at,
+    "external_order_id": Order.external_order_id,
+    "marketplace": Order.marketplace,
+    "delivery_status": Order.delivery_status,
+}
+
+
 async def list_orders(
     *,
     email: str | None = None,
@@ -191,24 +279,25 @@ async def list_orders(
     remnawave_uuid: str | None = None,
     remnawave_username: str | None = None,
     external_order_id: str | None = None,
+    q: str | None = None,
+    sort: str = "created_at",
+    order: str = "desc",
     limit: int = 100,
     offset: int = 0,
     session=None,
 ) -> list[dict]:
     async with get_session(session) as s:
-        stmt = select(Order, Customer).outerjoin(Customer, Customer.id == Order.customer_id)
-        if email:
-            norm = normalize_email(email) or email.strip().lower()
-            stmt = stmt.where(Customer.email_normalized == norm)
-        if marketplace:
-            stmt = stmt.where(Order.marketplace == marketplace)
-        if remnawave_uuid:
-            stmt = stmt.where(Order.remnawave_uuid == remnawave_uuid)
-        if remnawave_username:
-            stmt = stmt.where(Order.remnawave_username == remnawave_username)
-        if external_order_id:
-            stmt = stmt.where(Order.external_order_id == str(external_order_id))
-        stmt = stmt.order_by(Order.created_at.desc()).offset(offset).limit(limit)
+        stmt = _orders_filter_stmt(
+            email=email,
+            marketplace=marketplace,
+            remnawave_uuid=remnawave_uuid,
+            remnawave_username=remnawave_username,
+            external_order_id=external_order_id,
+            q=q,
+        )
+        col = _ORDER_SORT_COLS.get(sort, Order.created_at)
+        stmt = stmt.order_by(col.asc() if order == "asc" else col.desc())
+        stmt = stmt.offset(offset).limit(limit)
         rows = (await s.execute(stmt)).all()
         return [_order_dict(o, c) for o, c in rows]
 
@@ -487,24 +576,96 @@ async def list_messages(
 async def list_inbox_threads(
     limit: int = 50,
     offset: int = 0,
+    q: str | None = None,
+    marketplace: str | None = None,
+    sort: str = "last_at",
+    order: str = "desc",
     session=None,
 ) -> dict:
-    """Paginated threads: one per customer."""
+    """Paginated threads: one per customer, with search/filter/sort."""
     async with get_session(session) as s:
-        total = await s.scalar(select(func.count()).select_from(Customer)) or 0
-        customers = (
-            await s.scalars(
-                select(Customer)
-                .order_by(Customer.updated_at.desc())
-                .offset(offset)
-                .limit(limit)
+        last_msg_sq = (
+            select(
+                Message.customer_id.label("cid"),
+                func.max(Message.written_at).label("last_at"),
             )
-        ).all()
+            .where(Message.customer_id.is_not(None))
+            .group_by(Message.customer_id)
+            .subquery()
+        )
+        order_count_sq = (
+            select(
+                Order.customer_id.label("cid"),
+                func.count().label("order_count"),
+            )
+            .where(Order.customer_id.is_not(None))
+            .group_by(Order.customer_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                Customer,
+                last_msg_sq.c.last_at,
+                func.coalesce(order_count_sq.c.order_count, 0).label("order_count"),
+            )
+            .outerjoin(last_msg_sq, last_msg_sq.c.cid == Customer.id)
+            .outerjoin(order_count_sq, order_count_sq.c.cid == Customer.id)
+        )
+
+        if marketplace:
+            stmt = stmt.where(
+                Customer.id.in_(
+                    select(Order.customer_id).where(
+                        Order.marketplace == marketplace,
+                        Order.customer_id.is_not(None),
+                    )
+                )
+            )
+
+        if q:
+            qq = q.strip()
+            if qq:
+                like = f"%{qq}%"
+                order_match = select(Order.customer_id).where(
+                    Order.customer_id.is_not(None),
+                    or_(
+                        Order.external_order_id == qq,
+                        Order.invoice_id == qq,
+                        Order.external_order_id.ilike(like),
+                        Order.invoice_id.ilike(like),
+                    ),
+                )
+                stmt = stmt.where(
+                    or_(
+                        Customer.email.ilike(like),
+                        Customer.email_normalized.ilike(like),
+                        Customer.id.in_(order_match),
+                    )
+                )
+
+        count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+        total = await s.scalar(count_stmt) or 0
+
+        asc = order == "asc"
+        if sort == "email":
+            col = Customer.email
+            stmt = stmt.order_by(col.asc().nulls_last() if asc else col.desc().nulls_last())
+        elif sort == "order_count":
+            col = order_count_sq.c.order_count
+            stmt = stmt.order_by(
+                func.coalesce(col, 0).asc() if asc else func.coalesce(col, 0).desc()
+            )
+        else:
+            # last_at: prefer last message time, fallback to customer.updated_at
+            la = func.coalesce(last_msg_sq.c.last_at, Customer.updated_at)
+            stmt = stmt.order_by(la.asc().nulls_last() if asc else la.desc().nulls_last())
+
+        stmt = stmt.offset(offset).limit(limit)
+        rows = (await s.execute(stmt)).all()
+
         threads = []
-        for c in customers:
-            order_count = await s.scalar(
-                select(func.count()).select_from(Order).where(Order.customer_id == c.id)
-            )
+        for c, last_at, order_count in rows:
             last_msg = await s.scalar(
                 select(Message)
                 .where(Message.customer_id == c.id)
@@ -515,12 +676,16 @@ async def list_inbox_threads(
                 {
                     "customer_id": c.id,
                     "email": c.email,
-                    "order_count": order_count or 0,
+                    "order_count": int(order_count or 0),
                     "last_message": last_msg.body if last_msg else None,
                     "last_at": (
-                        last_msg.written_at.isoformat()
-                        if last_msg and last_msg.written_at
-                        else None
+                        last_at.isoformat()
+                        if last_at
+                        else (
+                            last_msg.written_at.isoformat()
+                            if last_msg and last_msg.written_at
+                            else None
+                        )
                     ),
                 }
             )
@@ -536,20 +701,25 @@ async def count_orders(
     *,
     email: str | None = None,
     marketplace: str | None = None,
+    remnawave_uuid: str | None = None,
+    remnawave_username: str | None = None,
+    external_order_id: str | None = None,
+    q: str | None = None,
     session=None,
 ) -> int:
     async with get_session(session) as s:
-        stmt = select(func.count()).select_from(Order)
-        if email or marketplace:
-            stmt = select(func.count()).select_from(Order).outerjoin(
-                Customer, Customer.id == Order.customer_id
-            )
-            if email:
-                norm = normalize_email(email) or email.strip().lower()
-                stmt = stmt.where(Customer.email_normalized == norm)
-            if marketplace:
-                stmt = stmt.where(Order.marketplace == marketplace)
-        return await s.scalar(stmt) or 0
+        stmt = _orders_filter_stmt(
+            email=email,
+            marketplace=marketplace,
+            remnawave_uuid=remnawave_uuid,
+            remnawave_username=remnawave_username,
+            external_order_id=external_order_id,
+            q=q,
+        )
+        count_stmt = select(func.count()).select_from(
+            stmt.order_by(None).with_only_columns(Order.id).subquery()
+        )
+        return await s.scalar(count_stmt) or 0
 
 
 # ── Order params (dashboard-compatible) ─────────────────────────────────────
@@ -628,6 +798,62 @@ async def delete_order_param(record_id: int) -> bool:
         if param is None:
             return False
         await session.delete(param)
+        await session.commit()
+        return True
+
+
+# ── Param value mappings (human-readable catalog) ───────────────────────────
+
+
+def _param_mapping_dict(row: ParamValueMapping) -> dict:
+    return {
+        "id": row.id,
+        "type": row.type,
+        "label": row.label,
+        "value": row.value,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+async def list_param_value_mappings(type_: str | None = None) -> list[dict]:
+    async with async_session() as session:
+        stmt = select(ParamValueMapping).order_by(ParamValueMapping.type, ParamValueMapping.label)
+        if type_:
+            stmt = stmt.where(ParamValueMapping.type == type_)
+        rows = (await session.scalars(stmt)).all()
+        return [_param_mapping_dict(r) for r in rows]
+
+
+async def create_param_value_mapping(type_: str, label: str, value: str) -> dict:
+    async with async_session() as session:
+        row = ParamValueMapping(type=type_, label=label, value=value)
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return _param_mapping_dict(row)
+
+
+async def update_param_value_mapping(record_id: int, **kwargs) -> dict | None:
+    async with async_session() as session:
+        row = await session.get(ParamValueMapping, record_id)
+        if row is None:
+            return None
+        for key, value in kwargs.items():
+            if key == "type":
+                row.type = value
+            elif hasattr(row, key):
+                setattr(row, key, value)
+        await session.commit()
+        await session.refresh(row)
+        return _param_mapping_dict(row)
+
+
+async def delete_param_value_mapping(record_id: int) -> bool:
+    async with async_session() as session:
+        row = await session.get(ParamValueMapping, record_id)
+        if row is None:
+            return False
+        await session.delete(row)
         await session.commit()
         return True
 

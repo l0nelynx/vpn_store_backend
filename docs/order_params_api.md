@@ -36,9 +36,12 @@ Each record maps a combination of `(item_id, param_id, user_data_id)` to a typed
 |---------------|------------------------------------------|----------------------------------------|
 | `days`        | Subscription duration in days            | `"30"`, `"90"`, `"180"`, `"360"`       |
 | `hwid`        | Device limit (0 = unlimited)             | `"5"`, `"0"`                           |
-| `location`    | Squad UUID (used as `template`)          | `"1d371a32-e0d3-45f8-bbc0-cba60f61eeb4"` |
-| `internal_sq` | Internal squad UUID (reserved)           | -                                      |
+| `location`    | Legacy alias for internal squad UUID     | `"1d371a32-e0d3-45f8-bbc0-cba60f61eeb4"` |
+| `internal_sq` | Internal Remnawave squad UUID (preferred)| `"1d371a32-e0d3-45f8-bbc0-cba60f61eeb4"` |
 | `external_sq` | External squad UUID (used as `outer_squad`) | `"547e1588-2d00-4281-94e8-c9cfecfb7645"` |
+
+When both `internal_sq` and `location` are set for the same option set, **`internal_sq` wins**.
+Both map to Remnawave `active_internal_squads` on user create.
 
 ---
 
