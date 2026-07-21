@@ -6,7 +6,6 @@ import logging
 
 import aiohttp
 
-import store.api.aio_ggsel as ggsel
 import store.api.digiseller_client as dig
 import store.database.requests as rq
 from store.api.options_v1 import get_product_option, list_product_options, localized_name, variant_id
@@ -177,18 +176,11 @@ async def sync_ggsel_options(
     api_key = str(ggsel_key)
     total_opt = total_var = total_err = 0
     synced_offers = 0
-    auth_failed = False
 
     async with aiohttp.ClientSession() as http:
-        # Auth smoke-test against v2 (different error shape than /api/products/options)
+        # Auth smoke-test against v2 (different gate than /api/products/options)
         offers = await ggsel_v2.list_offers(http, base_url=base, api_key=api_key)
         if not offers:
-            probe_id = products[0]["external_item_id"]
-            probe = await ggsel_v2.list_offer_options(
-                http, base_url=base, api_key=api_key, offer_id=probe_id
-            )
-            # empty list can mean no options OR 401; check logs — if UNAUTHORIZED, fail hard
-            # Re-request to inspect status via a thin wrapper
             url = f"{base}/api_sellers/v2/offers"
             async with http.get(
                 url, headers={"Accept": "application/json", "Authorization": api_key}
@@ -209,8 +201,7 @@ async def sync_ggsel_options(
                         "token_source": "ggsel_api_key_authorization_v2",
                         "options_base": f"{base}/api_sellers/v2/offers/{{id}}/options",
                     }
-            # offers list empty but auth OK — fall through using product ids as offer ids
-            _ = probe
+            # Empty offer list with 2xx — still try product external_item_id as offer_id
 
         for p in products:
             oid = p["external_item_id"]
