@@ -60,38 +60,60 @@ async def fulfill_order(
     session=None,
     allow_extend: bool = False,
 ) -> dict[str, Any]:
-    """Idempotent provision.
+    """Idempotent provision with Remnawave as source of truth for the live sub URL.
 
-    Policy:
-    - Store order already delivered → no-op.
-    - Store order provisioned but not delivered → ``resend`` (caller may chat once).
-    - Remnawave username already exists (e.g. after empty DB migration) → **adopt**
-      into Store as delivered: no extend, no buyer chat (``send_message`` skipped by caller).
-    - Brand-new Remnawave user → create; caller sends delivery message.
-    - ``allow_extend=True`` only for intentional renew paths (not GGsel last-sales poll).
+    If Store says delivered but the Remnawave user was deleted → recreate panel user
+    and refresh Store row (Digiseller test inv=0 after manual delete).
     """
     days = days if days is not None else 30
     existing = await rq.get_order_by_external(
         marketplace, external_order_id, session=session
     )
-    if existing and existing.subscription_url and existing.delivery_status == 1:
+
+    rw_live = await rem.get_user_from_username(remnawave_username)
+
+    if existing and existing.delivery_status == 1 and rw_live and rw_live.get("subscription_url"):
+        sub = rw_live["subscription_url"]
+        if sub != existing.subscription_url or str(rw_live.get("uuid")) != str(existing.remnawave_uuid):
+            await rq.update_order(
+                existing.id,
+                session=session,
+                subscription_url=sub,
+                remnawave_uuid=str(rw_live["uuid"]),
+            )
         return {
-            "sub": existing.subscription_url,
+            "sub": sub,
             "order_id": existing.id,
-            "remnawave_uuid": existing.remnawave_uuid,
+            "remnawave_uuid": str(rw_live["uuid"]),
             "event": "existing",
             "created": False,
             "should_notify_buyer": False,
         }
-    if existing and existing.subscription_url and existing.remnawave_uuid:
+
+    if (
+        existing
+        and existing.subscription_url
+        and existing.remnawave_uuid
+        and existing.delivery_status != 1
+        and rw_live
+        and rw_live.get("subscription_url")
+    ):
         return {
-            "sub": existing.subscription_url,
+            "sub": rw_live["subscription_url"],
             "order_id": existing.id,
-            "remnawave_uuid": existing.remnawave_uuid,
+            "remnawave_uuid": str(rw_live["uuid"]),
             "event": "resend",
             "created": False,
-            "should_notify_buyer": existing.delivery_status != 1,
+            "should_notify_buyer": True,
         }
+
+    if existing and existing.delivery_status == 1 and not rw_live:
+        logger.warning(
+            "Order %s/%s marked delivered but Remnawave user %s missing — recreating",
+            marketplace,
+            external_order_id,
+            remnawave_username,
+        )
 
     customer = await rq.get_or_create_customer(
         email=email,
@@ -117,13 +139,12 @@ async def fulfill_order(
             session=session,
         )
 
-    rw_user = await rem.get_user_from_username(remnawave_username)
     event_type = "create"
     should_notify = True
 
-    if rw_user and rw_user.get("uuid"):
-        rw_uuid = str(rw_user["uuid"])
-        sub_url = rw_user.get("subscription_url")
+    if rw_live and rw_live.get("uuid"):
+        rw_uuid = str(rw_live["uuid"])
+        sub_url = rw_live.get("subscription_url")
         if allow_extend:
             extended = await rem.extend_user(rw_uuid, days=days)
             if extended:
@@ -134,8 +155,6 @@ async def fulfill_order(
                 event_type = "adopted"
                 should_notify = False
         else:
-            # Historical Remnawave user (or rediscovery after DB reset): do not
-            # extend and do not spam marketplace chat again.
             event_type = "adopted"
             should_notify = False
             logger.info(
@@ -167,11 +186,18 @@ async def fulfill_order(
             }
         sub_url = created["subscription_url"]
         rw_uuid = str(created["uuid"])
-        event_type = "create"
-        should_notify = True
+        event_type = "recreate" if existing else "create"
+        # Digiseller returns URL in webhook body; GGsel may still want a chat message
+        # only for true first-time create. Recreate after panel delete: notify buyer
+        # for GGsel, Digiseller gets URL via HTTP response.
+        should_notify = marketplace == "ggsel"
 
-    delivery_status = 1 if event_type == "adopted" else 0
-    status = "delivered" if event_type == "adopted" else "provisioned"
+    delivery_status = 0 if should_notify else 1
+    if event_type in ("adopted", "existing"):
+        delivery_status = 1
+    if event_type == "recreate" and marketplace == "digiseller":
+        delivery_status = 1
+    status = "delivered" if delivery_status == 1 else "provisioned"
 
     await rq.update_order(
         order.id,
@@ -189,16 +215,22 @@ async def fulfill_order(
     await rq.add_subscription_event(
         order.id,
         event_type,
-        days=days if event_type != "adopted" else 0,
+        days=days if event_type not in ("adopted", "existing") else 0,
         remnawave_uuid=str(rw_uuid),
-        detail="adopted existing remnawave user" if event_type == "adopted" else None,
+        detail=(
+            "recreated after missing remnawave user"
+            if event_type == "recreate"
+            else ("adopted existing remnawave user" if event_type == "adopted" else None)
+        ),
         session=session,
     )
 
-    if event_type == "create" or (event_type == "extend" and should_notify):
+    if event_type in ("create", "recreate", "extend") and (
+        event_type != "extend" or should_notify
+    ):
         await send_tg_alert(
             message=(
-                f"<b>⚠️ New {marketplace} Order</b>\n"
+                f"<b>⚠️ {'Recreated' if event_type == 'recreate' else 'New'} {marketplace} Order</b>\n"
                 f"<b>🎫 OrderId: </b><code>{external_order_id}</code>\n"
                 f"<b>👤 Email: </b><code>{email or 'None'}</code>\n"
                 f"<b>📱 HWID Limit: </b><code>{hwid if hwid is not None else 'default'}</code>\n"
@@ -221,7 +253,7 @@ async def fulfill_order(
         "order_id": order.id,
         "remnawave_uuid": str(rw_uuid),
         "event": event_type,
-        "created": event_type == "create",
+        "created": event_type in ("create", "recreate"),
         "should_notify_buyer": should_notify,
     }
 

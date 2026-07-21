@@ -48,13 +48,6 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
         if not await rq.item_id_exists(item_id, session=session):
             return 400
 
-        existing = await rq.get_order_by_external(
-            "digiseller", str(payment_data["inv"]), session=session
-        )
-        if existing and existing.subscription_url:
-            logger.info("Идемпотентный ответ для inv=%s", payment_data["inv"])
-            return existing.subscription_url
-
         sign = generate_signature(
             payment_data["id"],
             payment_data["inv"],
@@ -74,6 +67,8 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
         days = order_params["days"] if order_params["days"] is not None else 30
         email = _buyer_email(payment_data)
 
+        # Always go through fulfill_order: verifies Remnawave still has the user;
+        # recreates dig_id{inv} if the panel account was deleted (e.g. test inv=0).
         result = await fulfill_order(
             marketplace="digiseller",
             external_order_id=str(payment_data["inv"]),
@@ -89,10 +84,17 @@ async def payment_async_logic(payment_data: dict[str, Any]) -> Any:
             outer_squad=order_params["outer_squad"],
             digiseller_buyer_id=str(payment_data.get("buyer_id") or payment_data["inv"]),
             session=session,
+            allow_extend=False,
         )
         if result.get("sub"):
             await mark_delivered(result["order_id"], session=session)
             await session.commit()
+            logger.info(
+                "Digiseller inv=%s event=%s url_ok=%s",
+                payment_data["inv"],
+                result.get("event"),
+                bool(result.get("sub")),
+            )
             return result["sub"]
         await session.rollback()
         return 400
