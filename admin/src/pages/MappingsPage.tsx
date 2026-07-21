@@ -11,6 +11,7 @@ type OrderParam = {
 };
 
 const TYPES = ["days", "hwid", "location", "internal_sq", "external_sq"];
+const BASE = "/store/api/admin/order-params";
 
 export default function MappingsPage() {
   const [params, setParams] = useState<OrderParam[]>([]);
@@ -25,7 +26,7 @@ export default function MappingsPage() {
 
   async function load() {
     try {
-      setParams(await api<OrderParam[]>("/store/api/order-params/"));
+      setParams(await api<OrderParam[]>(BASE));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     }
@@ -39,7 +40,7 @@ export default function MappingsPage() {
     e.preventDefault();
     setError("");
     try {
-      await api("/store/api/order-params/", {
+      await api(BASE, {
         method: "POST",
         body: JSON.stringify({
           item_id: Number(form.item_id),
@@ -57,7 +58,7 @@ export default function MappingsPage() {
   }
 
   async function onDelete(id: number) {
-    await api(`/store/api/order-params/${id}`, { method: "DELETE" });
+    await api(`${BASE}/${id}`, { method: "DELETE" });
     await load();
   }
 
@@ -65,7 +66,8 @@ export default function MappingsPage() {
     <div>
       <h2>Option → Remnawave mappings</h2>
       <p className="muted">
-        Same contract as dashboard Store page (`item_id` / `param_id` / `user_data_id`).
+        Same contract as dashboard Store page (<code>item_id</code> / <code>param_id</code> /{" "}
+        <code>user_data_id</code>).
       </p>
       {error && <p className="error">{error}</p>}
       <form className="card row" onSubmit={onCreate}>

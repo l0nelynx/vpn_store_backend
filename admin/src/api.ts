@@ -19,10 +19,14 @@ export async function api<T = unknown>(
   const headers = new Headers(options.headers || {});
   headers.set("Content-Type", "application/json");
   const token = getToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const isLogin = path.includes("/admin/login");
+  if (token && !isLogin) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(path, { ...options, headers });
-  if (res.status === 401) {
+  if (res.status === 401 && !isLogin) {
     clearToken();
+    if (!window.location.pathname.includes("/login")) {
+      window.location.href = "/store/admin/login";
+    }
     throw new Error("Unauthorized");
   }
   if (!res.ok) {

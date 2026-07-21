@@ -1,5 +1,5 @@
 import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
-import { clearToken, getToken } from "./api";
+import { api, clearToken, getToken } from "./api";
 import LoginPage from "./pages/LoginPage";
 import ProductsPage from "./pages/ProductsPage";
 import OrdersPage from "./pages/OrdersPage";
@@ -19,7 +19,12 @@ function Shell({ children }: { children: React.ReactNode }) {
         <NavLink to="/inbox">Inbox</NavLink>
         <button
           style={{ marginTop: "1.5rem", width: "100%" }}
-          onClick={() => {
+          onClick={async () => {
+            try {
+              await api("/store/api/admin/logout", { method: "POST" });
+            } catch {
+              /* ignore */
+            }
             clearToken();
             nav("/login");
           }}

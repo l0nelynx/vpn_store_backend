@@ -8,8 +8,12 @@ tg_bot_username: ""
 uvicorn_host: "0.0.0.0"
 uvicorn_port: 5001
 
-api_token: "change-me"
-admin_password: "change-me"
+api_token: "change-me-service-token"
+admin_login: "admin"
+admin_password: "change-me-strong-password"
+# Optional: separate HMAC secret for admin sessions (otherwise derived from login+password+api_token)
+# admin_session_secret: "long-random-string"
+# admin_session_ttl: 43200
 
 # Postgres (recommended). Example for docker-compose:
 # database_url: "postgresql+asyncpg://store:store@postgres:5432/store"
@@ -32,7 +36,7 @@ ggsel_seller_id: ""
 ggsel_api_key: ""
 ggsel_base_url: "https://seller.ggsel.com"
 ggsel_check_interval: 1
-ggsel_top_value: 10
+ggsel_top_value: 50
 ggsel_request_retries: 3
 ggsel_retry_timeout: 5
 ggsel_error_threshold: 5

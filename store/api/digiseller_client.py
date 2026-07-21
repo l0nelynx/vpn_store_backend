@@ -97,3 +97,22 @@ async def send_message(
         headers={"Accept": "application/json", "Content-Type": "application/json"},
     ) as resp:
         return resp.status
+
+
+async def list_last_sales(
+    session: aiohttp.ClientSession,
+    token: str,
+    top: int = 50,
+) -> list[dict]:
+    seller_id = secrets.get("dig_seller_id")
+    url = (
+        f"{_base_url()}/api/seller-last-sales"
+        f"?token={token}&seller_id={seller_id}&top={top}"
+    )
+    async with session.get(url, headers={"Accept": "application/json", "locale": "ru-RU"}) as resp:
+        if resp.status != 200:
+            logger.warning("Digiseller last-sales HTTP %s", resp.status)
+            return []
+        data = await resp.json(content_type=None)
+        sales = data.get("sales") or data.get("retval") or []
+        return sales if isinstance(sales, list) else []
