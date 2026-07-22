@@ -15,8 +15,10 @@ admin_password: "change-me-strong-password"
 # admin_session_secret: "long-random-string"
 # admin_session_ttl: 43200
 
-# Postgres (recommended). Example for docker-compose:
-# database_url: "postgresql+asyncpg://store:store@postgres:5432/store"
+# Postgres (recommended). Docker Compose service hostname is store-postgres
+# (not `postgres` — that name collides with xray-vpn-bot on backend-network):
+# database_url: "postgresql+asyncpg://store:store@store-postgres:5432/store"
+# From the host: postgresql+asyncpg://store:store@127.0.0.1:5433/store
 # Local SQLite default if omitted:
 # database_url: "sqlite+aiosqlite:///db/backend_db.sqlite3"
 

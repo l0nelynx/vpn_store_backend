@@ -1,5 +1,8 @@
 services:
-  postgres:
+  # Service name must NOT be `postgres` — that hostname collides on the shared
+  # external `backend-network` with xray-vpn-bot dual-homed containers, which
+  # resolve DATABASE_URL host `postgres` and then hit this DB (wrong user/pass).
+  store-postgres:
     image: postgres:16-alpine
     container_name: store-postgres
     environment:
@@ -9,9 +12,10 @@ services:
     volumes:
       - ./pg_data:/var/lib/postgresql/data
     ports:
+      # Host 5433 — xray-vpn-bot already binds 127.0.0.1:5432
       - "127.0.0.1:5433:5432"
     networks:
-      - backend-network
+      - store-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U store -d store"]
@@ -25,7 +29,7 @@ services:
       context: .
       dockerfile: Dockerfile
     depends_on:
-      postgres:
+      store-postgres:
         condition: service_healthy
     volumes:
       - type: bind
@@ -36,10 +40,16 @@ services:
     ports:
       - "127.0.0.1:5001:5001"
     networks:
+      # Private: talk to store-postgres by hostname `store-postgres`
+      - store-network
+      # Shared with xray edge nginx — do NOT put Postgres on this network
       - backend-network
     restart: unless-stopped
 
 networks:
+  store-network:
+    name: store-network
+    driver: bridge
   backend-network:
     name: backend-network
     driver: bridge
