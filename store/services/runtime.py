@@ -621,7 +621,8 @@ async def handle_digiseller_supplier(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def ingest_ggsel_purchase(content: dict[str, Any], sale: dict[str, Any] | None = None) -> tuple[Order, PipelineRun | None, bool]:
-    invoice_id, content_id = content.get("invoice_id"), content.get("content_id")
+    invoice_id = content.get("invoice_id") or (sale or {}).get("invoice_id")
+    content_id = content.get("content_id")
     state = ggsel.normalize_state(content.get("invoice_state"))
     if not invoice_id or not content_id:
         raise PipelineError("invalid_order", "GGSel order is missing invoice_id/content_id", permanent=True)

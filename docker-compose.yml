@@ -39,6 +39,8 @@ services:
         condition: service_healthy
       store-migrate:
         condition: service_completed_successfully
+      store-legacy-import:
+        condition: service_completed_successfully
     volumes:
       - ./backend.yml:/usr/src/app/backend.yml
       - ./admin/dist:/usr/src/app/admin/dist:ro
@@ -68,6 +70,8 @@ services:
         condition: service_healthy
       store-migrate:
         condition: service_completed_successfully
+      store-legacy-import:
+        condition: service_completed_successfully
     volumes:
       - ./backend.yml:/usr/src/app/backend.yml:ro
     networks:
@@ -86,6 +90,31 @@ services:
         condition: service_healthy
     volumes:
       - ./backend.yml:/usr/src/app/backend.yml:ro
+    networks:
+      - store-network
+    restart: "no"
+
+  store-legacy-import:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment: *store-app-environment
+    command:
+      - python
+      - -m
+      - store.legacy_import
+      - --source
+      - /legacy/backend_db.sqlite3
+      - --if-exists
+      - --apply
+    depends_on:
+      store-postgres:
+        condition: service_healthy
+      store-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend.yml:/usr/src/app/backend.yml:ro
+      - ./db:/legacy:ro
     networks:
       - store-network
     restart: "no"

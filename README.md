@@ -22,6 +22,11 @@ active bindings and receive the published compatibility pipeline automatically.
 Rows without a marketplace remain `needs_configuration` and must be assigned in
 Store Admin because their provider cannot be inferred safely.
 
+During rollout Compose also runs the idempotent `store-legacy-import` job after
+Alembic. If `db/backend_db.sqlite3` exists, it is mounted read-only and its
+`order_params`, `param_value_mappings` and `product_option_labels` are copied to
+PostgreSQL before the API and worker start. Repeated runs do not duplicate data.
+
 ## Docs
 
 - [Order Params API](docs/order_params_api.md) — dashboard-compatible mapping CRUD

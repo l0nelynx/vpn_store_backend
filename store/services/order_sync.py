@@ -16,6 +16,21 @@ from store.services.runtime import execute_run, ingest_ggsel_purchase, ingest_or
 logger = logging.getLogger(__name__)
 
 
+def _ggsel_order_content(info: dict, invoice_id: str | int) -> dict:
+    """Normalize info_order without conflating invoice and chat identifiers.
+
+    Seller API V1 returns ``invoice_id`` in seller-last-sales, while the
+    purchase/info response content starts with ``item_id`` and ``content_id``.
+    Preserve the verified lookup key explicitly for ingestion/idempotency.
+    """
+    payload = info.get("content") or info
+    if not isinstance(payload, dict):
+        return {}
+    content = dict(payload)
+    content.setdefault("invoice_id", invoice_id)
+    return content
+
+
 async def _checkpoint(provider: str, seen_ids: list[str], *, success: bool, detail: str | None = None) -> None:
     async with async_session() as session:
         row = await session.scalar(
@@ -53,7 +68,7 @@ async def sync_ggsel_orders(top: int = 50) -> dict:
                 seen.append(str(invoice_id))
                 try:
                     info = await ggsel.purchase(http, invoice_id)
-                    content = info.get("content") or info
+                    content = _ggsel_order_content(info, invoice_id)
                     state = ggsel.normalize_state(content.get("invoice_state"))
                     if state not in {"paid", "fulfilled"}:
                         skipped += 1

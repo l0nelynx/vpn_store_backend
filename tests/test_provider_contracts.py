@@ -4,6 +4,7 @@ import hashlib
 import asyncio
 
 from store.integrations.providers import DigisellerAdapter, GGSelAdapter
+from store.services.order_sync import _ggsel_order_content
 from store.settings import secrets
 
 
@@ -46,6 +47,20 @@ def test_provider_state_normalization_is_adapter_specific() -> None:
     assert [digiseller.normalize_state(value) for value in (3, 4, 5, 35)] == [
         "paid", "overdue", "refund", "refund"
     ]
+
+
+def test_ggsel_purchase_info_keeps_invoice_and_content_ids_separate() -> None:
+    payload = {
+        "retval": 0,
+        "content": {
+            "item_id": 5422669,
+            "content_id": 987654,
+            "invoice_state": 4,
+        },
+    }
+    content = _ggsel_order_content(payload, 40941008)
+    assert content["invoice_id"] == 40941008
+    assert content["content_id"] == 987654
 
 
 def test_digiseller_supplier_signature(monkeypatch) -> None:
