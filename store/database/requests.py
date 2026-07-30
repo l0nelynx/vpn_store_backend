@@ -529,7 +529,6 @@ async def upsert_product(
         elif (
             legacy_params
             and binding.status == "needs_configuration"
-            and binding.published_pipeline_version_id is None
         ):
             binding.status = "active"
             binding.trigger_policy = "automatic"

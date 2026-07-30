@@ -309,6 +309,7 @@ async def bootstrap_legacy_pipelines() -> None:
                 await session.scalars(
                     select(ProductBinding).where(
                         ProductBinding.provider == provider,
+                        ProductBinding.status == "active",
                         ProductBinding.published_pipeline_version_id.is_(None),
                     )
                 )

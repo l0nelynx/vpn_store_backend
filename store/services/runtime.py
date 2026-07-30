@@ -187,8 +187,12 @@ async def ingest_order(
             return existing, run, False
 
         binding = await _binding(provider, item_id, session)
-        if not binding:
-            raise PipelineError("product_not_configured", "Товар не настроен для автоматической доставки", permanent=True)
+        if not binding and normalized_status == "paid":
+            raise PipelineError(
+                "product_not_configured",
+                f"Товар {provider}:{item_id} не настроен для автоматической доставки",
+                permanent=True,
+            )
         customer = await _get_or_create_customer(email, provider, buyer_id, session)
         external = content_id if provider == "ggsel" and content_id else provider_order_id
         gross_value, net_value = _decimal(gross_amount), _decimal(net_amount)
@@ -218,7 +222,7 @@ async def ingest_order(
             cart_uid=str(payload.get("cart_uid")) if payload.get("cart_uid") else None,
             provider_external_order_id=str(payload.get("external_order_id")) if payload.get("external_order_id") else None,
             item_id=item_id,
-            binding_id=binding.id,
+            binding_id=binding.id if binding else None,
             options=options,
             options_json=json.dumps(options, ensure_ascii=False),
             raw=payload,
@@ -239,13 +243,13 @@ async def ingest_order(
             gross_rub=rub(gross_value, gross_curr),
             net_rub=rub(net_value, net_curr),
             fx_rate_id=fx_rate.id if fx_rate else None,
-            pipeline_version_id=binding.published_pipeline_version_id,
+            pipeline_version_id=binding.published_pipeline_version_id if binding else None,
         )
         session.add(order)
         await session.flush()
         session.add(OrderEvent(order_id=order.id, type="order.ingested", payload={"provider": provider, "state": normalized_status}))
         run = None
-        if normalized_status == "paid" and binding.published_pipeline_version_id:
+        if normalized_status == "paid" and binding and binding.published_pipeline_version_id:
             run = PipelineRun(
                 order_id=order.id,
                 pipeline_version_id=binding.published_pipeline_version_id,

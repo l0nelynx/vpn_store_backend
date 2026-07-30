@@ -108,7 +108,10 @@ async def _binding(provider: str, item_id: int, session) -> ProductBinding:
         )
         session.add(binding)
         await session.flush()
-    elif binding.status == "needs_configuration" and binding.published_pipeline_version_id is None:
+    elif binding.status == "needs_configuration":
+        # Legacy parameters make this binding unambiguous. It may already have
+        # received a compatibility pipeline from an earlier worker bootstrap;
+        # that must not prevent activation.
         binding.status = "active"
         binding.trigger_policy = "automatic"
         product = await session.get(Product, binding.product_id)
