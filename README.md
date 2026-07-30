@@ -17,6 +17,11 @@ Pipelines, Remnawave provisioning, generic HTTP actions and Store Admin.
 3. `docker compose up -d` runs migrations, API and worker as separate processes.
 4. Admin SPA: `cd admin && pnpm install && pnpm run build` → served at `/store/admin/`
 
+Legacy products with an explicit `order_params.marketplace` are backfilled into
+active bindings and receive the published compatibility pipeline automatically.
+Rows without a marketplace remain `needs_configuration` and must be assigned in
+Store Admin because their provider cannot be inferred safely.
+
 ## Docs
 
 - [Order Params API](docs/order_params_api.md) — dashboard-compatible mapping CRUD

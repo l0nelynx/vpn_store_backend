@@ -80,4 +80,10 @@ async def sync_digiseller_catalog() -> int:
 async def sync_all_catalogs() -> dict:
     g = await sync_ggsel_catalog()
     d = await sync_digiseller_catalog()
+    # A newly discovered catalog item can already have legacy order_params.
+    # Attach the compatibility pipeline after upsert_product activates and
+    # links such an unambiguous binding.
+    from store.services.pipelines import bootstrap_legacy_pipelines
+
+    await bootstrap_legacy_pipelines()
     return {"ggsel": g, "digiseller": d}

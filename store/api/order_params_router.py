@@ -17,6 +17,7 @@ class OrderParamCreate(BaseModel):
     user_data_id: int
     type: str
     data: str
+    marketplace: str | None = None
 
 
 class OrderParamUpdate(BaseModel):
@@ -25,6 +26,7 @@ class OrderParamUpdate(BaseModel):
     user_data_id: int | None = None
     type: str | None = None
     data: str | None = None
+    marketplace: str | None = None
 
 
 @order_params_router.get("/")
@@ -40,6 +42,7 @@ async def create_order_param(body: OrderParamCreate):
         user_data_id=body.user_data_id,
         type_=body.type,
         data=body.data,
+        marketplace=body.marketplace,
     )
     return {"status": "created"}
 

@@ -60,7 +60,7 @@ class GGSelAdapter:
         self.seller_id = str(secrets.get("ggsel_seller_id") or "")
         self.api_key = str(secrets.get("ggsel_api_key") or "")
         self.cache = _TokenCache()
-        self._last_timestamp = 0.0
+        self._last_timestamp_us = 0
 
     def normalize_state(self, raw: int | str | None) -> str:
         try:
@@ -74,9 +74,10 @@ class GGSelAdapter:
         async with self.cache.lock:
             if self.cache.valid() and not force:
                 return self.cache.token or ""
-            now = time.time()
-            self._last_timestamp = max(now, self._last_timestamp + 0.000001)
-            timestamp = f"{self._last_timestamp:.6f}"
+            now_us = time.time_ns() // 1_000
+            self._last_timestamp_us = max(now_us, self._last_timestamp_us + 1)
+            seconds, micros = divmod(self._last_timestamp_us, 1_000_000)
+            timestamp = f"{seconds}.{micros:06d}"
             sign = hashlib.sha256(f"{self.api_key}{timestamp}".encode()).hexdigest()
             async with http.post(
                 f"{self.base_url}/api_sellers/api/apilogin",

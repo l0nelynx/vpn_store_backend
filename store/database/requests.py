@@ -500,24 +500,43 @@ async def upsert_product(
                 ProductBinding.external_item_id == external_item_id,
             )
         )
+        legacy_params = (
+            await s.scalars(
+                select(OrderParam).where(
+                    OrderParam.marketplace == marketplace,
+                    OrderParam.item_id == external_item_id,
+                )
+            )
+        ).all()
         if binding is None:
             local = Product(
                 key=f"import-{marketplace}-{external_item_id}",
                 name=name or f"{marketplace} #{external_item_id}",
-                status="draft",
+                status="active" if legacy_params else "draft",
             )
             s.add(local)
             await s.flush()
-            s.add(
-                ProductBinding(
-                    product_id=local.id,
-                    provider=marketplace,
-                    external_item_id=external_item_id,
-                    trigger_policy="manual",
-                    status="needs_configuration",
-                    option_mappings={},
-                )
+            binding = ProductBinding(
+                product_id=local.id,
+                provider=marketplace,
+                external_item_id=external_item_id,
+                trigger_policy="automatic" if legacy_params else "manual",
+                status="active" if legacy_params else "needs_configuration",
+                option_mappings={},
             )
+            s.add(binding)
+            await s.flush()
+        elif (
+            legacy_params
+            and binding.status == "needs_configuration"
+            and binding.published_pipeline_version_id is None
+        ):
+            binding.status = "active"
+            binding.trigger_policy = "automatic"
+        if legacy_params:
+            for parameter in legacy_params:
+                parameter.binding_id = binding.id
+                parameter.configuration_status = "configured"
         if session is None:
             await s.commit()
             await s.refresh(product)
@@ -787,8 +806,25 @@ async def count_orders(
 # ── Order params (dashboard-compatible) ─────────────────────────────────────
 
 
-async def create_order_param(item_id: int, param_id: int, user_data_id: int, type_: str, data: str):
+async def create_order_param(
+    item_id: int,
+    param_id: int,
+    user_data_id: int,
+    type_: str,
+    data: str,
+    marketplace: str | None = None,
+):
     async with async_session() as session:
+        if not marketplace:
+            providers = set(
+                await session.scalars(
+                    select(ProductOptionLabel.marketplace)
+                    .where(ProductOptionLabel.item_id == item_id)
+                    .distinct()
+                )
+            )
+            if len(providers) == 1:
+                marketplace = providers.pop()
         session.add(
             OrderParam(
                 item_id=item_id,
@@ -796,6 +832,7 @@ async def create_order_param(item_id: int, param_id: int, user_data_id: int, typ
                 user_data_id=user_data_id,
                 type=type_,
                 data=data,
+                marketplace=marketplace,
             )
         )
         await session.commit()
@@ -829,6 +866,9 @@ async def get_all_order_params(item_id: int | None = None) -> list[dict]:
                 "user_data_id": row.user_data_id,
                 "type": row.type,
                 "data": row.data,
+                "marketplace": row.marketplace,
+                "binding_id": row.binding_id,
+                "configuration_status": row.configuration_status,
             }
             for row in result
         ]
