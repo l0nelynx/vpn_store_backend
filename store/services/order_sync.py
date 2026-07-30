@@ -78,6 +78,11 @@ async def sync_ggsel_orders(top: int = 50) -> dict:
                     if state == "fulfilled":
                         fulfilled += int(created)
                         continue
+                    if order.delivery_status == 1 or order.normalized_status in {"delivered", "fulfilled"}:
+                        # A marketplace may keep returning state=3 after the
+                        # legacy service already delivered the order.
+                        skipped += 1
+                        continue
                     if run:
                         result = await execute_run(run.id)
                         delivered += int(result.get("status") in {"delivered", "delivered_with_warnings"})

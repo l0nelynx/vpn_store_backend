@@ -159,11 +159,24 @@ async def ingest_order(
 ) -> tuple[Order, PipelineRun | None, bool]:
     options = options or []
     async with async_session() as session:
+        identifiers = [Order.provider_order_id == str(provider_order_id)]
+        if invoice_id:
+            identifiers.append(Order.invoice_id == str(invoice_id))
+        if provider == "ggsel" and content_id:
+            # Legacy GGSel rows used content_id as external_order_id/chat_id.
+            # Looking up both identifiers prevents an old paid invoice from
+            # being provisioned again after migration.
+            content = str(content_id)
+            identifiers.extend((
+                Order.external_order_id == content,
+                Order.content_id == content,
+                Order.chat_id == content,
+            ))
         existing = await session.scalar(
             select(Order).where(
                 Order.marketplace == provider,
-                Order.provider_order_id == str(provider_order_id),
-            )
+                or_(*identifiers),
+            ).order_by(Order.delivery_status.desc(), Order.id)
         )
         if existing:
             if email:
@@ -182,6 +195,15 @@ async def ingest_order(
                 if not run:
                     existing.status = existing.normalized_status = "fulfilled"
                     existing.delivery_status = 1
+            if existing.delivery_status == 1:
+                # Never revive or create a run for a historical delivery.
+                run = await session.scalar(select(PipelineRun).where(PipelineRun.order_id == existing.id))
+                if run and run.status not in {"delivered", "delivered_with_warnings"}:
+                    run.status = "delivered"
+                    run.error_code = None
+                    run.error_detail = None
+                    run.execution_locked_at = None
+                    run.completed_at = datetime.now(timezone.utc)
             await session.commit()
             run = await session.scalar(select(PipelineRun).where(PipelineRun.order_id == existing.id))
             return existing, run, False
@@ -410,6 +432,16 @@ async def execute_run(run_id: int, *, before_response_only: bool = False) -> dic
         order = await session.get(Order, run.order_id, with_for_update=True)
         now = datetime.now(timezone.utc)
         if run.status in {"delivered", "delivered_with_warnings"}:
+            return {"status": run.status, "response": order.final_delivery_response}
+        if order.delivery_status == 1 or order.normalized_status in {"delivered", "fulfilled"}:
+            # Final safety gate: a queued continuation from before legacy
+            # reconciliation must not execute provisioning or messaging.
+            run.status = "delivered"
+            run.error_code = None
+            run.error_detail = None
+            run.execution_locked_at = None
+            run.completed_at = run.completed_at or now
+            await session.commit()
             return {"status": run.status, "response": order.final_delivery_response}
         if run.status == "running" and run.execution_locked_at and run.execution_locked_at > now - timedelta(minutes=5):
             return {"status": "running", "response": order.final_delivery_response}

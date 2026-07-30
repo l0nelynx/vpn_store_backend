@@ -12,15 +12,21 @@ import asyncio
 import json
 import sqlite3
 from collections import defaultdict
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 
 from store.database.models import (
+    Customer,
     MarketplaceProduct,
+    Order,
+    OrderEvent,
     OrderParam,
     ParamValueMapping,
+    PipelineRun,
     Product,
     ProductBinding,
     ProductOptionLabel,
@@ -29,7 +35,13 @@ from store.database.models import (
 from store.services.pipelines import bootstrap_legacy_pipelines
 
 
-TABLES = ("order_params", "param_value_mappings", "product_option_labels")
+TABLES = (
+    "customers",
+    "orders",
+    "order_params",
+    "param_value_mappings",
+    "product_option_labels",
+)
 PROVIDERS = {"ggsel", "digiseller"}
 
 
@@ -55,6 +67,212 @@ def read_legacy_snapshot(path: Path) -> dict[str, list[dict[str, Any]]]:
 def _provider(value: Any) -> str | None:
     normalized = str(value or "").strip().lower()
     return normalized if normalized in PROVIDERS else None
+
+
+def _text(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _options(value: Any) -> list[dict[str, Any]]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+
+
+def _is_delivered(source: dict[str, Any]) -> bool:
+    """Trust only the legacy delivery flag, never a marketplace state alone."""
+    try:
+        return int(source.get("delivery_status") or 0) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+async def _legacy_customer(
+    source_id: Any,
+    sources: dict[int, dict[str, Any]],
+    imported: dict[int, Customer],
+    session,
+) -> Customer | None:
+    try:
+        legacy_id = int(source_id)
+    except (TypeError, ValueError):
+        return None
+    if legacy_id in imported:
+        return imported[legacy_id]
+    source = sources.get(legacy_id)
+    if not source:
+        return None
+    email = _text(source.get("email"))
+    normalized = _text(source.get("email_normalized")) or (email.lower() if email else None)
+    ggsel_id = _text(source.get("ggsel_buyer_id"))
+    digiseller_id = _text(source.get("digiseller_buyer_id"))
+    clauses = []
+    if normalized:
+        clauses.append(Customer.email_normalized == normalized)
+    if ggsel_id:
+        clauses.append(Customer.ggsel_buyer_id == ggsel_id)
+    if digiseller_id:
+        clauses.append(Customer.digiseller_buyer_id == digiseller_id)
+    customer = await session.scalar(select(Customer).where(or_(*clauses)).limit(1)) if clauses else None
+    if customer is None:
+        customer = Customer(
+            email=email,
+            email_normalized=normalized,
+            ggsel_buyer_id=ggsel_id,
+            digiseller_buyer_id=digiseller_id,
+        )
+        session.add(customer)
+        await session.flush()
+    else:
+        customer.email = customer.email or email
+        customer.email_normalized = customer.email_normalized or normalized
+        customer.ggsel_buyer_id = customer.ggsel_buyer_id or ggsel_id
+        customer.digiseller_buyer_id = customer.digiseller_buyer_id or digiseller_id
+    imported[legacy_id] = customer
+    return customer
+
+
+async def _matching_orders(source: dict[str, Any], provider: str, session) -> list[Order]:
+    external_id = _text(source.get("external_order_id"))
+    invoice_id = _text(source.get("invoice_id"))
+    clauses = []
+    if external_id:
+        clauses.append(Order.external_order_id == external_id)
+    if invoice_id:
+        clauses.extend((Order.provider_order_id == invoice_id, Order.invoice_id == invoice_id))
+    if provider == "ggsel" and external_id:
+        # In the legacy GGSel schema external_order_id held the chat/content id.
+        clauses.extend((Order.content_id == external_id, Order.chat_id == external_id))
+    if not clauses:
+        return []
+    return list((await session.scalars(
+        select(Order).where(Order.marketplace == provider, or_(*clauses))
+    )).all())
+
+
+async def _import_delivered_orders(
+    snapshot: dict[str, list[dict[str, Any]]], session
+) -> dict[str, int]:
+    result = {
+        "legacy_orders_seen": len(snapshot["orders"]),
+        "legacy_orders_delivered": 0,
+        "orders_inserted": 0,
+        "orders_reconciled": 0,
+        "runs_suppressed": 0,
+    }
+    customer_sources = {
+        int(row["id"]): row for row in snapshot["customers"] if row.get("id") is not None
+    }
+    customers: dict[int, Customer] = {}
+    now = datetime.now(timezone.utc)
+    for source in snapshot["orders"]:
+        provider = _provider(source.get("marketplace"))
+        if not provider or not _is_delivered(source):
+            continue
+        result["legacy_orders_delivered"] += 1
+        matches = await _matching_orders(source, provider, session)
+        if matches:
+            for order in matches:
+                was_terminal = order.delivery_status == 1
+                order.delivery_status = 1
+                order.status = order.normalized_status = "delivered"
+                runs = list((await session.scalars(
+                    select(PipelineRun).where(PipelineRun.order_id == order.id)
+                )).all())
+                for run in runs:
+                    if run.status not in {"delivered", "delivered_with_warnings"}:
+                        run.status = "delivered"
+                        run.error_code = None
+                        run.error_detail = None
+                        run.execution_locked_at = None
+                        run.completed_at = now
+                        result["runs_suppressed"] += 1
+                if not was_terminal:
+                    session.add(OrderEvent(
+                        order_id=order.id,
+                        type="order.legacy_delivery_reconciled",
+                        payload={"legacy_order_id": source.get("id")},
+                    ))
+                    result["orders_reconciled"] += 1
+            continue
+
+        external_id = _text(source.get("external_order_id"))
+        invoice_id = _text(source.get("invoice_id"))
+        if not external_id and not invoice_id:
+            continue
+        customer = await _legacy_customer(source.get("customer_id"), customer_sources, customers, session)
+        item_id = source.get("item_id")
+        binding = None
+        if item_id is not None:
+            binding = await session.scalar(select(ProductBinding).where(
+                ProductBinding.provider == provider,
+                ProductBinding.external_item_id == int(item_id),
+            ))
+        content_id = external_id if provider == "ggsel" else None
+        provider_order_id = invoice_id or (external_id if provider == "digiseller" else None)
+        options = _options(source.get("options_json"))
+        order = Order(
+            marketplace=provider,
+            external_order_id=external_id or invoice_id,
+            provider_order_id=provider_order_id,
+            invoice_id=invoice_id or (provider_order_id if provider == "digiseller" else None),
+            content_id=content_id,
+            item_id=int(item_id) if item_id is not None else None,
+            binding_id=binding.id if binding else None,
+            options=options,
+            options_json=source.get("options_json"),
+            raw={"legacy_sqlite_order_id": source.get("id")},
+            raw_state=_text(source.get("status")),
+            normalized_status="delivered",
+            status="delivered",
+            delivery_status=1,
+            buyer_email=customer.email if customer else None,
+            amount=_decimal(source.get("amount")),
+            currency=_text(source.get("currency")),
+            chat_id=_text(source.get("chat_id")) or content_id or provider_order_id,
+            days_ordered=source.get("days_ordered"),
+            remnawave_username=_text(source.get("remnawave_username")),
+            remnawave_uuid=_text(source.get("remnawave_uuid")),
+            subscription_url=_text(source.get("subscription_url")),
+            customer_id=customer.id if customer else None,
+            created_at=_timestamp(source.get("created_at")) or now,
+            updated_at=_timestamp(source.get("updated_at")) or now,
+        )
+        session.add(order)
+        await session.flush()
+        session.add(OrderEvent(
+            order_id=order.id,
+            type="order.legacy_delivery_imported",
+            payload={"legacy_order_id": source.get("id")},
+        ))
+        result["orders_inserted"] += 1
+    return result
 
 
 async def _provider_candidates(snapshot: dict[str, list[dict[str, Any]]], session) -> dict[int, set[str]]:
@@ -131,6 +349,7 @@ async def import_snapshot(snapshot: dict[str, list[dict[str, Any]]]) -> dict[str
         "params_needs_configuration": 0,
     }
     async with async_session() as session:
+        result.update(await _import_delivered_orders(snapshot, session))
         for source in snapshot["param_value_mappings"]:
             type_ = str(source.get("type") or "").strip()
             value = str(source.get("value") or "").strip()
