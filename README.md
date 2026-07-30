@@ -9,6 +9,9 @@ Pipelines, Remnawave provisioning, generic HTTP actions and Store Admin.
 2. Configure PostgreSQL (it is the only supported database). In Docker use
    `database_url: postgresql+asyncpg://store:store@store-postgres:5432/store`
    (the local host bind is `127.0.0.1:5433`).
+   Compose passes the internal DSN explicitly to API, worker and migrations.
+   Override it only through `STORE_DOCKER_DATABASE_URL`; do not use a host
+   `127.0.0.1:5433` URL inside containers.
    Do **not** name the DB service `postgres` on the shared `backend-network` —
    xray-vpn-bot dual-homed containers would resolve that hostname to the wrong DB.
 3. `docker compose up -d` runs migrations, API and worker as separate processes.

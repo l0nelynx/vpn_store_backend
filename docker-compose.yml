@@ -1,3 +1,8 @@
+x-store-app-environment: &store-app-environment
+  # Never reuse a host-side STORE_DATABASE_URL here: 127.0.0.1:5433 is valid
+  # only from the host. Containers must reach Postgres over the Compose network.
+  STORE_DATABASE_URL: ${STORE_DOCKER_DATABASE_URL:-postgresql+asyncpg://store:store@store-postgres:5432/store}
+
 services:
   # Service name must NOT be `postgres` — that hostname collides on the shared
   # external `backend-network` with xray-vpn-bot dual-homed containers, which
@@ -28,6 +33,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    environment: *store-app-environment
     depends_on:
       store-postgres:
         condition: service_healthy
@@ -55,6 +61,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    environment: *store-app-environment
     command: ["python", "-m", "store.worker"]
     depends_on:
       store-postgres:
@@ -72,6 +79,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    environment: *store-app-environment
     command: ["alembic", "upgrade", "head"]
     depends_on:
       store-postgres:
