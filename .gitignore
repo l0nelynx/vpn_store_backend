@@ -20,3 +20,6 @@ admin/node_modules
 pg_data
 __pycache__/
 *.pyc
+.testdeps/
+.pnpm-store/
+admin/tsconfig.tsbuildinfo

@@ -1,30 +1,38 @@
-import logging
-
 import asyncio
-import aiohttp
+import json
+import logging
+from urllib.parse import parse_qs
 
-import store.api.aio_ggsel as aio_gg
-
-from aiogram import Dispatcher, Router
-from aiogram.filters import Command
-from aiogram.types import Message
 from fastapi import Request, Response, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from store.api.digiseller import payment_async_logic
+from store.domain.pipeline import PipelineError
+from store.services.runtime import handle_digiseller_supplier
 from store.api.order_params_router import order_params_router
 from store.api.admin_router import admin_router
 from store.api.crm_router import crm_router
 from store.api.messages_router import messages_router
-from store.settings import run_webserver, app_uvi, backend_bot, secrets
+from store.api.v1_router import router as v1_router
+from store.settings import run_webserver, app_uvi
 from store.notify import webhook_tg_notify
 
 app_uvi.include_router(order_params_router)
 app_uvi.include_router(admin_router)
 app_uvi.include_router(crm_router)
 app_uvi.include_router(messages_router)
+app_uvi.include_router(v1_router)
+
+
+@app_uvi.get("/store/health", tags=["health"])
+async def health():
+    from sqlalchemy import text
+    from store.database.models import async_session
+
+    async with async_session() as session:
+        await session.execute(text("SELECT 1"))
+    return {"ok": True, "database": "postgresql", "runtime": "api"}
 
 _admin_dist = Path(__file__).parent / "admin" / "dist"
 if _admin_dist.is_dir():
@@ -47,69 +55,38 @@ if _admin_dist.is_dir():
                 return FileResponse(candidate)
         return FileResponse(_admin_dist / "index.html")
 
-router = Router()
-
-
-@router.message(Command("message"))
-async def cmd_message(message: Message) -> None:
-    if message.from_user.id != int(secrets.get("admin_id")):
-        return
-
-    args = message.text.split(maxsplit=2)
-    if len(args) < 3:
-        await message.reply("Использование: /message <id_i> <текст>")
-        return
-
-    try:
-        id_i = int(args[1])
-    except ValueError:
-        await message.reply("id_i должен быть числом")
-        return
-
-    text = args[2]
-
-    try:
-        async with aiohttp.ClientSession(
-            base_url=secrets.get("ggsel_base_url") or "https://seller.ggsel.com"
-        ) as session:
-            token = await aio_gg.get_token(session)
-            status = await aio_gg.send_message(session, id_i, text, token)
-        if status == 200:
-            await message.reply(f"Сообщение отправлено (id_i={id_i})")
-        else:
-            await message.reply(f"Ошибка отправки, статус: {status}")
-    except Exception as e:
-        await message.reply(f"Ошибка: {e}")
-
-
 @app_uvi.post("/store/digiseller_webhook")
 async def payment_webhook(request: Request, response: Response):
     try:
-        payment_data = await request.json()
-        link = await payment_async_logic(payment_data)
-        if link in (400, None):
-            raise HTTPException(status_code=400, detail="bad request")
-        content = {
-            "id": f"{payment_data['id']}",
-            "inv": f"{payment_data['inv']}",
-            "goods": f"{link}",
-            "error": "",
-        }
+        content_type = request.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            payment_data = await request.json()
+        else:
+            form = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+            payment_data = {key: values[-1] for key, values in form.items()}
+            if isinstance(payment_data.get("options"), str):
+                try:
+                    payment_data["options"] = json.loads(payment_data["options"])
+                except ValueError:
+                    payment_data["options"] = []
+        content = await handle_digiseller_supplier(payment_data)
         response.status_code = 200
         return content
+    except PipelineError as e:
+        if e.code == "invalid_signature":
+            raise HTTPException(status_code=403, detail="invalid signature") from e
+        logging.error("Digiseller pipeline error: %s", e)
+        return {"id": "", "inv": ""}
     except HTTPException:
         raise
     except Exception as e:
         logging.error("Ошибка обработки платежа: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "id": "",
-                "inv": "0",
-                "goods": "",
-                "error": "Internal server error",
-            },
-        )
+        # A temporary internal failure must remain opaque to the buyer. Returning
+        # only id/inv asks Digiseller Supplier API to retry the same delivery.
+        return {
+            "id": str(payment_data.get("id") or "") if isinstance(payment_data, dict) else "",
+            "inv": str(payment_data.get("inv") or "") if isinstance(payment_data, dict) else "",
+        }
 
 
 @app_uvi.post("/store/ggsel_webhook_new")
@@ -118,12 +95,11 @@ async def ggsel_payment_webhook(request: Request, response: Response):
         payment_data = await request.json()
         logging.debug("GGsel webhook data: %s", payment_data)
         await webhook_tg_notify(payment_data, "GGSELL")
-        try:
-            result = await aio_gg.process_webhook_payload(payment_data)
-            return {"notify": 200, "fulfill": result}
-        except Exception as fe:
-            logging.error("GGsel webhook fulfill error: %s", fe)
-            return {"notify": 200, "fulfill_error": str(fe)}
+        # V1 does not define this payload as a trusted fulfillment trigger.
+        # Keep the endpoint for existing senders, but actual delivery starts
+        # only after seller-last-sales + purchase/info verification in worker.
+        response.status_code = 202
+        return {"notify": 200, "fulfill": "verification_queued"}
     except Exception as e:
         logging.error("Ошибка обработки платежа: %s", e)
         raise HTTPException(
@@ -142,13 +118,7 @@ async def main():
 
     await db_init()
 
-    dp = Dispatcher()
-    dp.include_router(router)
-    await asyncio.gather(
-        run_webserver(),
-        aio_gg.order_delivery_loop(),
-        dp.start_polling(backend_bot),
-    )
+    await run_webserver()
 
 
 if __name__ == "__main__":

@@ -6,9 +6,9 @@ import logging
 
 import aiohttp
 
-import store.api.digiseller_client as dig
 import store.database.requests as rq
 from store.api.options_v1 import get_product_option, list_product_options, localized_name, variant_id
+from store.integrations.providers import digiseller
 from store.settings import secrets
 
 logger = logging.getLogger(__name__)
@@ -103,16 +103,7 @@ async def sync_digiseller_options(
         }
 
     async with aiohttp.ClientSession() as http:
-        token = await dig.get_token(http)
-        if not token:
-            return {
-                "marketplace": "digiseller",
-                "products": 0,
-                "options": 0,
-                "variants": 0,
-                "errors": 1,
-                "detail": "dig_seller_id / dig_api_key not configured",
-            }
+        token = await digiseller.token(http)
         base = (secrets.get("dig_url") or "https://api.digiseller.com").rstrip("/")
         total_opt = total_var = total_err = 0
         for p in products:

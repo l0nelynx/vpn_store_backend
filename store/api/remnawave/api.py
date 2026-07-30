@@ -269,6 +269,25 @@ async def update_user(
         return None
 
 
+async def update_user_email(user_uuid: str, email: str):
+    """Update only the marketplace email; never reactivate or change limits/expiry."""
+    try:
+        remnawave = get_sdk()
+        safe = _safe_email(email, "user")
+        if not safe:
+            return None
+        request = UpdateUserRequestDto(uuid=uuid.UUID(str(user_uuid)), email=safe)
+        response: UserResponseDto = await remnawave.users.update_user(request)
+        return {
+            "uuid": str(response.uuid),
+            "email": response.email,
+            "subscription_url": response.subscription_url,
+        }
+    except Exception as e:
+        _log_rw_error("update_user_email", str(user_uuid), e)
+        return None
+
+
 async def delete_user(user_uuid: str) -> bool:
     try:
         remnawave = get_sdk()

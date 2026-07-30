@@ -7,10 +7,8 @@ import logging
 
 import aiohttp
 
-import store.api.aio_ggsel as ggsel
-import store.api.digiseller_client as dig
 import store.database.requests as rq
-from store.settings import secrets
+from store.integrations.providers import digiseller, ggsel
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +30,9 @@ def _item_fields(row: dict) -> tuple[int | None, str | None, float | None, str |
 
 
 async def sync_ggsel_catalog() -> int:
-    base = secrets.get("ggsel_base_url") or "https://seller.ggsel.com"
     count = 0
-    async with aiohttp.ClientSession(base_url=base) as session:
-        token = await ggsel.get_token(session)
-        data = await ggsel.list_seller_goods(session, token)
-        rows = data.get("rows") or data.get("goods") or data.get("retval") or []
-        if isinstance(rows, dict):
-            rows = list(rows.values()) if rows else []
+    async with aiohttp.ClientSession() as session:
+        rows = await ggsel.seller_goods(session)
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -63,11 +56,7 @@ async def sync_ggsel_catalog() -> int:
 async def sync_digiseller_catalog() -> int:
     count = 0
     async with aiohttp.ClientSession() as session:
-        token = await dig.get_token(session)
-        if not token:
-            logger.warning("Skip Digiseller catalog sync — no token")
-            return 0
-        rows = await dig.list_seller_goods(session, token)
+        rows = await digiseller.seller_goods(session)
         for row in rows:
             if not isinstance(row, dict):
                 continue

@@ -15,7 +15,9 @@ from store.database.models import (
     Order,
     OrderParam,
     ParamValueMapping,
+    MarketplaceProduct,
     Product,
+    ProductBinding,
     ProductOptionLabel,
     SubscriptionEvent,
     Transaction,
@@ -107,6 +109,19 @@ async def get_order_by_external(
         )
 
 
+async def get_order_by_provider_id(
+    marketplace: str, provider_order_id: str, session=None
+) -> Order | None:
+    """Canonical idempotency lookup (GGSel invoice_id, Digiseller inv)."""
+    async with get_session(session) as s:
+        return await s.scalar(
+            select(Order).where(
+                Order.marketplace == marketplace,
+                Order.provider_order_id == str(provider_order_id),
+            )
+        )
+
+
 async def get_orders_by_externals(
     marketplace: str, external_order_ids: list[str], session=None
 ) -> dict[str, Order]:
@@ -165,8 +180,15 @@ async def create_order(
         order = Order(
             marketplace=marketplace,
             external_order_id=str(external_order_id),
+            provider_order_id=(
+                str(invoice_id)
+                if marketplace == "ggsel" and invoice_id is not None
+                else str(external_order_id)
+            ),
             invoice_id=str(invoice_id) if invoice_id is not None else None,
+            content_id=str(external_order_id) if marketplace == "ggsel" else None,
             item_id=item_id,
+            options=options or [],
             options_json=json.dumps(options, ensure_ascii=False) if options is not None else None,
             amount=amount,
             currency=currency,
@@ -175,6 +197,7 @@ async def create_order(
             remnawave_username=remnawave_username,
             customer_id=customer_id,
             status=status,
+            normalized_status=status,
             delivery_status=0,
         )
         s.add(order)
@@ -406,11 +429,20 @@ def _order_dict(order: Order, customer: Customer | None = None) -> dict:
         "id": order.id,
         "marketplace": order.marketplace,
         "external_order_id": order.external_order_id,
+        "provider_order_id": order.provider_order_id,
         "invoice_id": order.invoice_id,
+        "content_id": order.content_id,
+        "cart_uid": order.cart_uid,
         "item_id": order.item_id,
         "amount": order.amount,
+        "gross_amount": order.gross_amount,
+        "net_amount": order.net_amount,
+        "profit_amount": order.profit_amount,
+        "gross_rub": order.gross_rub,
+        "net_rub": order.net_rub,
         "currency": order.currency,
         "status": order.status,
+        "normalized_status": order.normalized_status,
         "delivery_status": order.delivery_status,
         "chat_id": order.chat_id,
         "days_ordered": order.days_ordered,
@@ -418,7 +450,9 @@ def _order_dict(order: Order, customer: Customer | None = None) -> dict:
         "remnawave_uuid": order.remnawave_uuid,
         "subscription_url": order.subscription_url,
         "customer_id": order.customer_id,
-        "email": customer.email if customer else None,
+        "email": order.buyer_email or (customer.email if customer else None),
+        "pipeline_version_id": order.pipeline_version_id,
+        "final_delivery_response": order.final_delivery_response,
         "created_at": order.created_at.isoformat() if order.created_at else None,
     }
 
@@ -436,27 +470,54 @@ async def upsert_product(
     raw_json: str | None = None,
     is_hidden: bool = False,
     session=None,
-) -> Product:
+) -> MarketplaceProduct:
     async with get_session(session) as s:
         product = await s.scalar(
-            select(Product).where(
-                Product.marketplace == marketplace,
-                Product.external_item_id == external_item_id,
+            select(MarketplaceProduct).where(
+                MarketplaceProduct.provider == marketplace,
+                MarketplaceProduct.external_item_id == external_item_id,
             )
         )
         if product is None:
-            product = Product(
-                marketplace=marketplace,
+            product = MarketplaceProduct(
+                provider=marketplace,
                 external_item_id=external_item_id,
             )
             s.add(product)
         product.name = name
         product.price = price
         product.currency = currency
-        product.raw_json = raw_json
+        try:
+            product.raw = json.loads(raw_json) if raw_json else {}
+        except (TypeError, ValueError):
+            product.raw = {"unparsed": str(raw_json)}
         product.is_hidden = is_hidden
         product.synced_at = datetime.now(timezone.utc)
         await s.flush()
+        binding = await s.scalar(
+            select(ProductBinding).where(
+                ProductBinding.provider == marketplace,
+                ProductBinding.external_item_id == external_item_id,
+            )
+        )
+        if binding is None:
+            local = Product(
+                key=f"import-{marketplace}-{external_item_id}",
+                name=name or f"{marketplace} #{external_item_id}",
+                status="draft",
+            )
+            s.add(local)
+            await s.flush()
+            s.add(
+                ProductBinding(
+                    product_id=local.id,
+                    provider=marketplace,
+                    external_item_id=external_item_id,
+                    trigger_policy="manual",
+                    status="needs_configuration",
+                    option_mappings={},
+                )
+            )
         if session is None:
             await s.commit()
             await s.refresh(product)
@@ -465,15 +526,15 @@ async def upsert_product(
 
 async def list_products(marketplace: str | None = None, session=None) -> list[dict]:
     async with get_session(session) as s:
-        stmt = select(Product)
+        stmt = select(MarketplaceProduct)
         if marketplace:
-            stmt = stmt.where(Product.marketplace == marketplace)
-        stmt = stmt.order_by(Product.marketplace, Product.external_item_id)
+            stmt = stmt.where(MarketplaceProduct.provider == marketplace)
+        stmt = stmt.order_by(MarketplaceProduct.provider, MarketplaceProduct.external_item_id)
         rows = (await s.scalars(stmt)).all()
         return [
             {
                 "id": p.id,
-                "marketplace": p.marketplace,
+                "marketplace": p.provider,
                 "external_item_id": p.external_item_id,
                 "name": p.name,
                 "price": p.price,

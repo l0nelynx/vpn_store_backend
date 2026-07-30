@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -19,7 +20,9 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-db_url = secrets.get("database_url") or "sqlite+aiosqlite:///db/backend_db.sqlite3"
+db_url = os.getenv("STORE_DATABASE_URL") or secrets.get("database_url") or config.get_main_option("sqlalchemy.url")
+if not db_url or not db_url.startswith("postgresql+"):
+    raise RuntimeError("PostgreSQL STORE_DATABASE_URL/database_url is required")
 config.set_main_option("sqlalchemy.url", db_url)
 
 
@@ -30,7 +33,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,
+        compare_type=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -40,7 +43,7 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        render_as_batch=True,
+        compare_type=True,
     )
     with context.begin_transaction():
         context.run_migrations()
