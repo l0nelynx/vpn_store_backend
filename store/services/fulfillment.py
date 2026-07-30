@@ -1,16 +1,12 @@
-"""Shared order fulfillment: Remnawave provision + Order ledger."""
+"""Compatibility facade for callers from the pre-pipeline Store API."""
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-import store.api.remnawave.api as rem
 import store.database.requests as rq
-from store.notify import send_tg_alert
-from store.settings import secrets
-
-logger = logging.getLogger(__name__)
+from store.database.models import Order, PipelineRun, async_session
+from store.domain.pipeline import PipelineError
 
 
 async def parse_order_params(
@@ -29,13 +25,10 @@ async def parse_order_params(
             session=session,
         )
         result.update(params)
-    days = result.get("days")
-    hwid = result.get("hwid")
-    # Prefer explicit internal_sq; location remains a legacy alias.
-    template = result.get("internal_sq") or result.get("location")
+    days, hwid = result.get("days"), result.get("hwid")
     return {
         "days": int(days) if days is not None else None,
-        "template": template,
+        "template": result.get("internal_sq") or result.get("location"),
         "hwid": int(hwid) if hwid is not None else None,
         "outer_squad": result.get("external_sq"),
     }
@@ -63,216 +56,81 @@ async def fulfill_order(
     allow_extend: bool = False,
     rw_cache: dict | None = None,
 ) -> dict[str, Any]:
-    """Idempotent provision with Remnawave as source of truth for the live sub URL.
+    """Run the published legacy pipeline and return the old response shape.
 
-    If Store says delivered but the Remnawave user was deleted → recreate panel user
-    and refresh Store row (Digiseller test inv=0 after manual delete).
-
-    ``rw_cache``: optional username → user-dict|None from bulk stream to avoid N+1 GETs.
+    ``session``, ``allow_extend`` and ``rw_cache`` remain accepted so old tools
+    do not break, but execution and idempotency now belong to PipelineRuntime.
     """
-    days = days if days is not None else 30
-    existing = await rq.get_order_by_external(
-        marketplace, external_order_id, session=session
-    )
+    del session, allow_extend, rw_cache
+    if marketplace not in {"ggsel", "digiseller"} or item_id is None:
+        raise PipelineError("invalid_compat_order", "Marketplace and item_id are required", permanent=True)
 
-    if rw_cache is not None and remnawave_username in rw_cache:
-        cached = rw_cache[remnawave_username]
-        rw_live = cached if cached else None
-    else:
-        rw_live = await rem.get_user_from_username(remnawave_username)
-        if rw_cache is not None:
-            rw_cache[remnawave_username] = rw_live
+    from sqlalchemy import select
+    from store.services.runtime import build_context, execute_run, ingest_order
 
-    if existing and existing.delivery_status == 1 and rw_live and rw_live.get("subscription_url"):
-        sub = rw_live["subscription_url"]
-        if sub != existing.subscription_url or str(rw_live.get("uuid")) != str(existing.remnawave_uuid):
-            await rq.update_order(
-                existing.id,
-                session=session,
-                subscription_url=sub,
-                remnawave_uuid=str(rw_live["uuid"]),
-            )
-        return {
-            "sub": sub,
-            "order_id": existing.id,
-            "remnawave_uuid": str(rw_live["uuid"]),
-            "event": "existing",
-            "created": False,
-            "should_notify_buyer": False,
-        }
-
-    if (
-        existing
-        and existing.subscription_url
-        and existing.remnawave_uuid
-        and existing.delivery_status != 1
-        and rw_live
-        and rw_live.get("subscription_url")
-    ):
-        return {
-            "sub": rw_live["subscription_url"],
-            "order_id": existing.id,
-            "remnawave_uuid": str(rw_live["uuid"]),
-            "event": "resend",
-            "created": False,
-            "should_notify_buyer": True,
-        }
-
-    if existing and existing.delivery_status == 1 and not rw_live:
-        logger.warning(
-            "Order %s/%s marked delivered but Remnawave user %s missing — recreating",
-            marketplace,
-            external_order_id,
-            remnawave_username,
-        )
-
-    customer = await rq.get_or_create_customer(
+    provider_order_id = str(invoice_id or external_order_id) if marketplace == "ggsel" else str(external_order_id)
+    content_id = str(chat_id or external_order_id) if marketplace == "ggsel" else None
+    payload = {
+        "invoice_id": provider_order_id,
+        "content_id": content_id,
+        "item_id": item_id,
+        "invoice_state": 3,
+        "buyer_info": {"email": email},
+        "options": options or [],
+        "compatibility": True,
+    }
+    order, run, created = await ingest_order(
+        provider=marketplace,
+        provider_order_id=provider_order_id,
+        item_id=int(item_id),
+        payload=payload,
+        normalized_status="paid",
+        invoice_id=provider_order_id,
+        content_id=content_id,
         email=email,
-        ggsel_buyer_id=ggsel_buyer_id,
-        digiseller_buyer_id=digiseller_buyer_id,
-        session=session,
+        buyer_id=ggsel_buyer_id if marketplace == "ggsel" else digiseller_buyer_id,
+        options=options or [],
+        chat_id=str(chat_id or external_order_id),
+        gross_amount=amount,
+        net_amount=amount,
+        currency=currency,
     )
+    if run:
+        async with async_session() as db:
+            persistent_run = await db.get(PipelineRun, run.id)
+            persistent_order = await db.get(Order, order.id)
+            context = persistent_run.context or await build_context(persistent_order, persistent_run, db)
+            parameters = context.setdefault("product", {}).setdefault("parameters", {})
+            parameters.update({
+                key: value for key, value in {
+                    "days": days or 30,
+                    "internal_sq": template,
+                    "hwid": hwid,
+                    "external_sq": outer_squad,
+                }.items() if value is not None
+            })
+            context["trigger"]["compatibility_username"] = remnawave_username
+            persistent_run.context = context
+            await db.commit()
+        await execute_run(run.id, before_response_only=marketplace == "digiseller")
 
-    order = existing
-    if order is None:
-        order = await rq.create_order(
-            marketplace=marketplace,
-            external_order_id=external_order_id,
-            invoice_id=invoice_id,
-            item_id=item_id,
-            options=options,
-            amount=amount,
-            currency=currency,
-            chat_id=chat_id or str(external_order_id),
-            days_ordered=days,
-            remnawave_username=remnawave_username,
-            customer_id=customer.id,
-            session=session,
-        )
-
-    event_type = "create"
-    should_notify = True
-
-    if rw_live and rw_live.get("uuid"):
-        rw_uuid = str(rw_live["uuid"])
-        sub_url = rw_live.get("subscription_url")
-        if allow_extend:
-            extended = await rem.extend_user(rw_uuid, days=days)
-            if extended:
-                event_type = "extend"
-                sub_url = extended.get("subscription_url") or sub_url
-                should_notify = True
-            else:
-                event_type = "adopted"
-                should_notify = False
-        else:
-            event_type = "adopted"
-            should_notify = False
-            logger.info(
-                "Adopting existing Remnawave user %s for %s/%s (no extend, no buyer notify)",
-                remnawave_username,
-                marketplace,
-                external_order_id,
-            )
-    else:
-        created = await rem.create_user(
-            username=remnawave_username,
-            days=days,
-            limit_gb=0,
-            descr=f"created by store ({marketplace})",
-            email=email,
-            squad_id=template or secrets.get("rw_free_id"),
-            telegram_id=None,
-            hwid_device_limit=hwid,
-            external_squad_uuid=outer_squad,
-        )
-        if not created or not created.get("uuid"):
-            logger.error("Failed to create Remnawave user for %s", remnawave_username)
-            return {
-                "sub": None,
-                "order_id": order.id,
-                "created": False,
-                "event": "error",
-                "should_notify_buyer": False,
-            }
-        sub_url = created["subscription_url"]
-        rw_uuid = str(created["uuid"])
-        event_type = "recreate" if existing else "create"
-        # Digiseller returns URL in webhook body; GGsel may still want a chat message
-        # only for true first-time create. Recreate after panel delete: notify buyer
-        # for GGsel, Digiseller gets URL via HTTP response.
-        should_notify = marketplace == "ggsel"
-
-    delivery_status = 0 if should_notify else 1
-    if event_type in ("adopted", "existing"):
-        delivery_status = 1
-    if event_type == "recreate" and marketplace == "digiseller":
-        delivery_status = 1
-    status = "delivered" if delivery_status == 1 else "provisioned"
-
-    await rq.update_order(
-        order.id,
-        session=session,
-        remnawave_uuid=str(rw_uuid),
-        remnawave_username=remnawave_username,
-        subscription_url=sub_url,
-        days_ordered=days,
-        customer_id=customer.id,
-        chat_id=chat_id or order.chat_id or str(external_order_id),
-        status=status,
-        delivery_status=delivery_status,
-    )
-
-    await rq.add_subscription_event(
-        order.id,
-        event_type,
-        days=days if event_type not in ("adopted", "existing") else 0,
-        remnawave_uuid=str(rw_uuid),
-        detail=(
-            "recreated after missing remnawave user"
-            if event_type == "recreate"
-            else ("adopted existing remnawave user" if event_type == "adopted" else None)
-        ),
-        session=session,
-    )
-
-    if event_type in ("create", "recreate", "extend") and (
-        event_type != "extend" or should_notify
-    ):
-        await send_tg_alert(
-            message=(
-                f"<b>⚠️ {'Recreated' if event_type == 'recreate' else 'New'} {marketplace} Order</b>\n"
-                f"<b>🎫 OrderId: </b><code>{external_order_id}</code>\n"
-                f"<b>👤 Email: </b><code>{email or 'None'}</code>\n"
-                f"<b>📱 HWID Limit: </b><code>{hwid if hwid is not None else 'default'}</code>\n"
-                f"<b>📆 Days: </b>{days} ({event_type})\n"
-                f"<b>💻 UUID: </b><code>{rw_uuid}</code>\n"
-                f"<b>🔗 Link: </b><code>{sub_url}</code>"
-            ),
-            store_name=marketplace.upper()[:8],
-        )
-    else:
-        logger.info(
-            "Order %s/%s event=%s — skipped admin alert / buyer notify",
-            marketplace,
-            external_order_id,
-            event_type,
-        )
-
+    async with async_session() as db:
+        current = await db.scalar(select(Order).where(
+            Order.marketplace == marketplace,
+            Order.provider_order_id == provider_order_id,
+        ))
     return {
-        "sub": sub_url,
-        "order_id": order.id,
-        "remnawave_uuid": str(rw_uuid),
-        "event": event_type,
-        "created": event_type in ("create", "recreate"),
-        "should_notify_buyer": should_notify,
+        "sub": current.subscription_url if current else None,
+        "order_id": current.id if current else order.id,
+        "remnawave_uuid": current.remnawave_uuid if current else None,
+        "event": "create" if created else "existing",
+        "created": created,
+        # Marketplace delivery is already a pipeline step; old callers must not
+        # send a second chat message.
+        "should_notify_buyer": False,
     }
 
 
 async def mark_delivered(order_id: int, session=None) -> None:
-    await rq.update_order(
-        order_id,
-        delivery_status=1,
-        status="delivered",
-        session=session,
-    )
+    """Compatibility status update for old maintenance tools."""
+    await rq.update_order(order_id, delivery_status=1, status="delivered", session=session)

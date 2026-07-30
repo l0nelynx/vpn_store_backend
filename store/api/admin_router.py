@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 import store.database.requests as rq
 from store.api.auth import (
     check_admin_password,
-    create_session_token,
-    revoke_session_token,
+    create_session,
+    revoke_refresh,
+    rotate_refresh,
     verify_admin,
 )
 from store.services.catalog_sync import sync_all_catalogs
@@ -56,22 +57,61 @@ class ParamMappingUpdate(BaseModel):
 
 
 @admin_router.post("/login")
-async def login(body: LoginBody):
+async def login(body: LoginBody, response: Response):
     if not check_admin_password(body.username.strip(), body.password):
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    token = create_session_token(username=body.username.strip())
+    result = await create_session(body.username.strip())
+    response.set_cookie(
+        "store_refresh", result.pop("refresh_token"), httponly=True,
+        secure=bool(secrets.get("admin_cookie_secure", True)), samesite="strict",
+        max_age=int(secrets.get("admin_refresh_ttl") or 30 * 24 * 3600), path="/store/api/admin",
+    )
     return {
-        "token": token,
+        "token": result["access_token"],
+        "access_token": result["access_token"],
         "token_type": "bearer",
-        "expires_in": int(secrets.get("admin_session_ttl") or 12 * 3600),
-        "username": body.username.strip(),
+        "expires_in": result["expires_in"],
+        "username": result["username"],
     }
 
 
+@admin_router.post("/session")
+async def login_session(body: LoginBody, response: Response):
+    """Preferred browser login: rotating refresh token stays in an HttpOnly cookie."""
+    if not check_admin_password(body.username.strip(), body.password):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    result = await create_session(body.username.strip())
+    response.set_cookie(
+        "store_refresh", result.pop("refresh_token"), httponly=True,
+        secure=bool(secrets.get("admin_cookie_secure", True)), samesite="strict",
+        max_age=int(secrets.get("admin_refresh_ttl") or 30 * 24 * 3600), path="/store/api/admin",
+    )
+    return {
+        "token": result["access_token"],
+        "token_type": "bearer",
+        "expires_in": result["expires_in"],
+        "username": result["username"],
+    }
+
+
+@admin_router.post("/refresh")
+async def refresh_session(request: Request, response: Response):
+    token = request.cookies.get("store_refresh")
+    if not token:
+        raise HTTPException(status_code=401, detail="Refresh cookie missing")
+    result = await rotate_refresh(token)
+    response.set_cookie(
+        "store_refresh", result.pop("refresh_token"), httponly=True,
+        secure=bool(secrets.get("admin_cookie_secure", True)), samesite="strict",
+        max_age=int(secrets.get("admin_refresh_ttl") or 30 * 24 * 3600), path="/store/api/admin",
+    )
+    return {"token": result["access_token"], "token_type": "bearer", "expires_in": result["expires_in"]}
+
+
 @admin_router.post("/logout", dependencies=[Depends(verify_admin)])
-async def logout(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)):
-    if credentials:
-        revoke_session_token(credentials.credentials)
+async def logout(request: Request, response: Response, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)):
+    await revoke_refresh(request.cookies.get("store_refresh"))
+    response.delete_cookie("store_refresh", path="/store/api/admin")
     return {"ok": True}
 
 

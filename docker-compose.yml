@@ -31,10 +31,9 @@ services:
     depends_on:
       store-postgres:
         condition: service_healthy
+      store-migrate:
+        condition: service_completed_successfully
     volumes:
-      - type: bind
-        source: ./db
-        target: /usr/src/app/db
       - ./backend.yml:/usr/src/app/backend.yml
       - ./admin/dist:/usr/src/app/admin/dist:ro
     ports:
@@ -45,6 +44,43 @@ services:
       # Shared with xray edge nginx — do NOT put Postgres on this network
       - backend-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/store/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  store-worker:
+    container_name: store-worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "store.worker"]
+    depends_on:
+      store-postgres:
+        condition: service_healthy
+      store-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend.yml:/usr/src/app/backend.yml:ro
+    networks:
+      - store-network
+      - backend-network
+    restart: unless-stopped
+
+  store-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      store-postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend.yml:/usr/src/app/backend.yml:ro
+    networks:
+      - store-network
+    restart: "no"
 
 networks:
   store-network:

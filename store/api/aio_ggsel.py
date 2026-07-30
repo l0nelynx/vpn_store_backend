@@ -196,7 +196,7 @@ async def fulfill_ggsel_order(
     if content_id is None:
         return None
     invoice_state = content.get("invoice_state")
-    if invoice_state is not None and not (3 <= int(invoice_state) <= 4):
+    if invoice_state is not None and int(invoice_state) != 3:
         logger.info("GGsel order %s not paid (state=%s)", content_id, invoice_state)
         return None
 

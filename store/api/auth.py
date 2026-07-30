@@ -1,137 +1,158 @@
-"""Admin session tokens (HMAC-signed, time-limited).
-
-Service integrations keep using ``api_token``.
-Store Admin SPA uses short-lived session tokens issued after login —
-never the raw admin password as Bearer.
-"""
+"""Standards-based JWT access tokens and rotating refresh sessions."""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import secrets as py_secrets
-import time
-from base64 import urlsafe_b64decode, urlsafe_b64encode
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
+import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pwdlib import PasswordHash
+from sqlalchemy import select
 
+from store.database.models import AdminSession, async_session
 from store.settings import secrets
 
 _bearer_scheme = HTTPBearer(auto_error=False)
-
-# In-memory revoke set (restart clears — acceptable for single-node admin)
-_revoked: set[str] = set()
-
-
-def _session_secret() -> str:
-    explicit = secrets.get("admin_session_secret")
-    if explicit:
-        return str(explicit)
-    # Derive from configured secrets so tokens invalidate when password rotates
-    material = "|".join(
-        [
-            str(secrets.get("admin_password") or ""),
-            str(secrets.get("api_token") or ""),
-            str(secrets.get("admin_login") or "admin"),
-        ]
-    )
-    if not material.strip("|"):
-        raise RuntimeError("admin_password / api_token not configured")
-    return hashlib.sha256(material.encode()).hexdigest()
+_password_hash = PasswordHash.recommended()
+ISSUER = "vpn-store"
 
 
-def _b64e(data: bytes) -> str:
-    return urlsafe_b64encode(data).decode().rstrip("=")
-
-
-def _b64d(data: str) -> bytes:
-    pad = "=" * (-len(data) % 4)
-    return urlsafe_b64decode(data + pad)
-
-
-def create_session_token(*, username: str, ttl_seconds: int | None = None) -> str:
-    ttl = ttl_seconds or int(secrets.get("admin_session_ttl") or 12 * 3600)
-    payload = {
-        "sub": username,
-        "iat": int(time.time()),
-        "exp": int(time.time()) + ttl,
-        "jti": py_secrets.token_hex(8),
-        "typ": "store_admin",
-    }
-    body = _b64e(json.dumps(payload, separators=(",", ":")).encode())
-    sig = hmac.new(_session_secret().encode(), body.encode(), hashlib.sha256).hexdigest()
-    return f"{body}.{sig}"
-
-
-def verify_session_token(token: str) -> dict:
-    try:
-        body, sig = token.split(".", 1)
-    except ValueError as e:
-        raise HTTPException(status_code=401, detail="Malformed session") from e
-    expected = hmac.new(_session_secret().encode(), body.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, sig):
-        raise HTTPException(status_code=401, detail="Invalid session signature")
-    try:
-        payload = json.loads(_b64d(body))
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid session payload") from e
-    if payload.get("typ") != "store_admin":
-        raise HTTPException(status_code=401, detail="Invalid session type")
-    if int(payload.get("exp", 0)) < int(time.time()):
-        raise HTTPException(status_code=401, detail="Session expired")
-    jti = payload.get("jti")
-    if jti and jti in _revoked:
-        raise HTTPException(status_code=401, detail="Session revoked")
-    return payload
-
-
-def revoke_session_token(token: str) -> None:
-    try:
-        payload = verify_session_token(token)
-        if jti := payload.get("jti"):
-            _revoked.add(jti)
-    except HTTPException:
-        pass
+def _jwt_secret() -> str:
+    value = secrets.get("jwt_secret") or secrets.get("admin_session_secret")
+    if not value:
+        raise RuntimeError("STORE_JWT_SECRET/jwt_secret is required")
+    return str(value)
 
 
 def check_admin_password(username: str, password: str) -> bool:
     expected_user = str(secrets.get("admin_login") or "admin")
-    expected_pw = secrets.get("admin_password") or secrets.get("dashboard_password")
-    if not expected_pw:
+    if not hmac.compare_digest(username, expected_user):
         return False
+    password_hash = secrets.get("admin_password_hash")
+    if password_hash:
+        try:
+            return _password_hash.verify(password, str(password_hash))
+        except Exception:
+            return False
+    # Transitional support only; deployments should move to admin_password_hash.
+    expected = str(secrets.get("admin_password") or "")
+    return bool(expected) and hmac.compare_digest(
+        hashlib.sha256(password.encode()).digest(), hashlib.sha256(expected.encode()).digest()
+    )
 
-    def _eq(a: str, b: str) -> bool:
-        return hmac.compare_digest(
-            hashlib.sha256(a.encode()).digest(),
-            hashlib.sha256(b.encode()).digest(),
+
+def _encode_access(username: str, session_jti: str) -> tuple[str, int]:
+    ttl = int(secrets.get("admin_access_ttl") or 900)
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": username,
+        "iat": now,
+        "exp": now + timedelta(seconds=ttl),
+        "jti": py_secrets.token_hex(16),
+        "sid": session_jti,
+        "typ": "access",
+        "iss": ISSUER,
+    }
+    return jwt.encode(payload, _jwt_secret(), algorithm="HS256"), ttl
+
+
+def _refresh_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def create_session(username: str) -> dict[str, Any]:
+    refresh_ttl = int(secrets.get("admin_refresh_ttl") or 30 * 24 * 3600)
+    refresh = py_secrets.token_urlsafe(48)
+    jti = py_secrets.token_hex(16)
+    async with async_session() as session:
+        session.add(
+            AdminSession(
+                jti=jti,
+                username=username,
+                refresh_token_hash=_refresh_hash(refresh),
+                expires_at=datetime.now(timezone.utc) + timedelta(seconds=refresh_ttl),
+            )
         )
+        await session.commit()
+    access, ttl = _encode_access(username, jti)
+    return {"access_token": access, "refresh_token": refresh, "expires_in": ttl, "username": username}
 
-    return _eq(username, expected_user) and _eq(password, str(expected_pw))
+
+async def rotate_refresh(token: str) -> dict[str, Any]:
+    digest = _refresh_hash(token)
+    now = datetime.now(timezone.utc)
+    async with async_session() as session:
+        row = await session.scalar(
+            select(AdminSession).where(AdminSession.refresh_token_hash == digest).with_for_update()
+        )
+        if not row or row.revoked_at or row.expires_at <= now:
+            raise HTTPException(status_code=401, detail="Refresh session expired")
+        row.revoked_at = now
+        username = row.username
+        await session.commit()
+    return await create_session(username)
+
+
+async def revoke_refresh(token: str | None) -> None:
+    if not token:
+        return
+    async with async_session() as session:
+        row = await session.scalar(
+            select(AdminSession).where(AdminSession.refresh_token_hash == _refresh_hash(token)).with_for_update()
+        )
+        if row and not row.revoked_at:
+            row.revoked_at = datetime.now(timezone.utc)
+            await session.commit()
 
 
 async def verify_api_token(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ):
-    """Service-to-service: Bearer must equal api_token (bot dashboard proxy)."""
     token = secrets.get("api_token")
     if not token:
         raise HTTPException(status_code=503, detail="api_token not configured")
     if credentials is None or not hmac.compare_digest(credentials.credentials, str(token)):
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return credentials
+        raise HTTPException(status_code=401, detail="Invalid service token")
+    return {"sub": "service", "typ": "service"}
+
+
+def _decode_access(token: str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(
+            token, _jwt_secret(), algorithms=["HS256"], issuer=ISSUER,
+            options={"require": ["sub", "exp", "iat", "jti", "sid", "typ"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token") from exc
+    if payload.get("typ") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+    return payload
+
+
+async def verify_human_admin(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> dict[str, Any]:
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    payload = _decode_access(credentials.credentials)
+    async with async_session() as session:
+        row = await session.scalar(select(AdminSession).where(AdminSession.jti == payload["sid"]))
+        if not row or row.revoked_at or row.expires_at <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="Session revoked")
+    return payload
 
 
 async def verify_admin(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-):
-    """Store Admin SPA session OR service api_token."""
-    if credentials is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    presented = credentials.credentials
-    api_token = secrets.get("api_token")
-    if api_token and hmac.compare_digest(presented, str(api_token)):
-        return {"sub": "service", "typ": "api_token"}
-    # Do NOT accept raw admin_password anymore
-    return verify_session_token(presented)
+) -> dict[str, Any]:
+    """Compatibility admin APIs still accept the service token."""
+    if credentials:
+        service = secrets.get("api_token")
+        if service and hmac.compare_digest(credentials.credentials, str(service)):
+            return {"sub": "service", "typ": "service"}
+    return await verify_human_admin(credentials)

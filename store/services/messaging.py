@@ -7,10 +7,8 @@ from datetime import datetime, timezone
 
 import aiohttp
 
-import store.api.aio_ggsel as ggsel
-import store.api.digiseller_client as dig
 import store.database.requests as rq
-from store.settings import secrets
+from store.integrations.providers import digiseller, ggsel
 
 logger = logging.getLogger(__name__)
 
@@ -35,26 +33,21 @@ async def sync_order_messages(order_id: int) -> int:
         if order is None:
             return 0
         marketplace = order.marketplace
-        chat_id = order.chat_id or order.external_order_id
+        chat_id = order.content_id or order.chat_id or order.external_order_id
         customer_id = order.customer_id
         external_order_id = order.external_order_id
 
     count = 0
     if marketplace == "ggsel":
-        base = secrets.get("ggsel_base_url") or "https://seller.ggsel.com"
-        async with aiohttp.ClientSession(base_url=base) as http:
-            token = await ggsel.get_token(http)
-            messages = await ggsel.list_messages(http, token, int(chat_id))
+        async with aiohttp.ClientSession() as http:
+            messages = await ggsel.messages(http, int(chat_id))
             for m in messages:
                 count += await _store_msg(
                     "ggsel", m, order_id, customer_id, chat_id
                 )
     elif marketplace == "digiseller":
         async with aiohttp.ClientSession() as http:
-            token = await dig.get_token(http)
-            if not token:
-                return 0
-            messages = await dig.list_messages(http, token, chat_id)
+            messages = await digiseller.messages(http, order.provider_order_id or chat_id)
             for m in messages:
                 count += await _store_msg(
                     "digiseller", m, order_id, customer_id, chat_id
@@ -118,21 +111,18 @@ async def send_to_order(order_id: int, text: str) -> dict:
         if order is None:
             return {"ok": False, "error": "order not found"}
         marketplace = order.marketplace
-        chat_id = order.chat_id or order.external_order_id
+        chat_id = order.content_id or order.chat_id or order.external_order_id
         customer_id = order.customer_id
 
     status = 400
     if marketplace == "ggsel":
-        base = secrets.get("ggsel_base_url") or "https://seller.ggsel.com"
-        async with aiohttp.ClientSession(base_url=base) as http:
-            token = await ggsel.get_token(http)
-            status = await ggsel.send_message(http, int(chat_id), text, token)
+        async with aiohttp.ClientSession() as http:
+            await ggsel.send_message(http, int(chat_id), text)
+            status = 200
     elif marketplace == "digiseller":
         async with aiohttp.ClientSession() as http:
-            token = await dig.get_token(http)
-            if not token:
-                return {"ok": False, "error": "digiseller token unavailable"}
-            status = await dig.send_message(http, token, chat_id, text)
+            await digiseller.send_message(http, order.provider_order_id or chat_id, text)
+            status = 200
 
     if status == 200:
         await rq.upsert_message(
