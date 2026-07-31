@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select, update
 
 from store.database.models import (
     Customer,
+    MarketplaceChatAlert,
     Message,
     Order,
     OrderParam,
@@ -1143,4 +1144,195 @@ async def update_delivery_status(tg_id: int, new_delivery_status: int, session=N
                 .where(Transaction.user_id == user.id)
                 .values(delivery_status=new_delivery_status)
             )
+            await s.commit()
+
+
+async def resolve_order_for_chat(marketplace: str, chat_id: str, session=None) -> Order | None:
+    cid = str(chat_id)
+    async with get_session(session) as s:
+        return await s.scalar(
+            select(Order)
+            .where(
+                Order.marketplace == marketplace,
+                or_(
+                    Order.content_id == cid,
+                    Order.chat_id == cid,
+                    Order.provider_order_id == cid,
+                    Order.external_order_id == cid,
+                    Order.invoice_id == cid,
+                ),
+            )
+            .order_by(Order.id.desc())
+            .limit(1)
+        )
+
+
+async def upsert_chat_alert(
+    *,
+    marketplace: str,
+    chat_id: str,
+    cnt_new: int,
+    email: str | None = None,
+    last_message_at: datetime | None = None,
+    order_id: int | None = None,
+    customer_id: int | None = None,
+    session=None,
+) -> MarketplaceChatAlert:
+    async with get_session(session) as s:
+        row = await s.scalar(
+            select(MarketplaceChatAlert).where(
+                MarketplaceChatAlert.marketplace == marketplace,
+                MarketplaceChatAlert.chat_id == str(chat_id),
+            )
+        )
+        now = datetime.now(timezone.utc)
+        if row is None:
+            row = MarketplaceChatAlert(
+                marketplace=marketplace,
+                chat_id=str(chat_id),
+                email=email,
+                cnt_new=cnt_new,
+                last_message_at=last_message_at,
+                order_id=order_id,
+                customer_id=customer_id,
+                last_notified_cnt_new=0,
+                cleared_at=None if cnt_new > 0 else now,
+            )
+            s.add(row)
+        else:
+            row.email = email or row.email
+            row.cnt_new = cnt_new
+            row.last_message_at = last_message_at or row.last_message_at
+            if order_id is not None:
+                row.order_id = order_id
+            if customer_id is not None:
+                row.customer_id = customer_id
+            row.updated_at = now
+            if cnt_new > 0:
+                row.cleared_at = None
+            else:
+                row.cleared_at = row.cleared_at or now
+        if session is None:
+            await s.commit()
+            await s.refresh(row)
+        else:
+            await s.flush()
+        return row
+
+
+async def mark_chat_alert_notified(alert_id: int, cnt_new: int, session=None) -> None:
+    async with get_session(session) as s:
+        row = await s.get(MarketplaceChatAlert, alert_id)
+        if not row:
+            return
+        row.last_notified_cnt_new = cnt_new
+        row.updated_at = datetime.now(timezone.utc)
+        if session is None:
+            await s.commit()
+
+
+async def list_active_chat_alerts(limit: int = 50, session=None) -> dict:
+    async with get_session(session) as s:
+        rows = (
+            await s.scalars(
+                select(MarketplaceChatAlert)
+                .where(
+                    MarketplaceChatAlert.cnt_new > 0,
+                    MarketplaceChatAlert.cleared_at.is_(None),
+                )
+                .order_by(
+                    MarketplaceChatAlert.last_message_at.desc().nulls_last(),
+                    MarketplaceChatAlert.updated_at.desc(),
+                )
+                .limit(limit)
+            )
+        ).all()
+        total_new = await s.scalar(
+            select(func.coalesce(func.sum(MarketplaceChatAlert.cnt_new), 0)).where(
+                MarketplaceChatAlert.cnt_new > 0,
+                MarketplaceChatAlert.cleared_at.is_(None),
+            )
+        ) or 0
+        return {
+            "total_new": int(total_new),
+            "items": [
+                {
+                    "id": row.id,
+                    "marketplace": row.marketplace,
+                    "chat_id": row.chat_id,
+                    "email": row.email,
+                    "cnt_new": row.cnt_new,
+                    "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
+                    "order_id": row.order_id,
+                    "customer_id": row.customer_id,
+                }
+                for row in rows
+            ],
+        }
+
+
+async def clear_chat_alerts_for_customer(customer_id: int, session=None) -> list[dict]:
+    async with get_session(session) as s:
+        rows = (
+            await s.scalars(
+                select(MarketplaceChatAlert).where(
+                    MarketplaceChatAlert.customer_id == customer_id,
+                    MarketplaceChatAlert.cnt_new > 0,
+                )
+            )
+        ).all()
+        now = datetime.now(timezone.utc)
+        snapshot = [
+            {"marketplace": row.marketplace, "chat_id": row.chat_id, "id": row.id}
+            for row in rows
+        ]
+        for row in rows:
+            row.cnt_new = 0
+            row.last_notified_cnt_new = 0
+            row.cleared_at = now
+            row.updated_at = now
+        if session is None:
+            await s.commit()
+        return snapshot
+
+
+async def clear_chat_alert(marketplace: str, chat_id: str, session=None) -> MarketplaceChatAlert | None:
+    async with get_session(session) as s:
+        row = await s.scalar(
+            select(MarketplaceChatAlert).where(
+                MarketplaceChatAlert.marketplace == marketplace,
+                MarketplaceChatAlert.chat_id == str(chat_id),
+            )
+        )
+        if not row:
+            return None
+        row.cnt_new = 0
+        row.last_notified_cnt_new = 0
+        row.cleared_at = datetime.now(timezone.utc)
+        row.updated_at = datetime.now(timezone.utc)
+        if session is None:
+            await s.commit()
+            await s.refresh(row)
+        return row
+
+
+async def zero_missing_chat_alerts(marketplace: str, active_chat_ids: set[str], session=None) -> None:
+    """Mark alerts as cleared when marketplace no longer reports them as unread."""
+    async with get_session(session) as s:
+        rows = (
+            await s.scalars(
+                select(MarketplaceChatAlert).where(
+                    MarketplaceChatAlert.marketplace == marketplace,
+                    MarketplaceChatAlert.cnt_new > 0,
+                )
+            )
+        ).all()
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            if row.chat_id not in active_chat_ids:
+                row.cnt_new = 0
+                row.last_notified_cnt_new = 0
+                row.cleared_at = now
+                row.updated_at = now
+        if session is None:
             await s.commit()

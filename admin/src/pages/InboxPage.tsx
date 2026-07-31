@@ -119,45 +119,58 @@ export default function InboxPage() {
     setSheetOpen(true);
   }
 
-  const threadPane = (
-    <div className="flex h-full min-h-0 flex-col">
-      <h3 className="mb-3 text-base font-semibold">{title}</h3>
-      <div className="thread min-h-0 flex-1">
-        {messages.map((m) => (
-          <div key={m.id} className={`msg ${m.direction === "outbound" ? "out" : "in"}`}>
-            <div className="muted">{m.marketplace} · {m.written_at || ""}</div>
-            {m.body}
-          </div>
+  const composer = customerId ? (
+    <form className="stack shrink-0 border-t bg-background pt-3" onSubmit={send}>
+      <select
+        className="field"
+        value={orderId ?? ""}
+        onChange={(e) => setOrderId(Number(e.target.value))}
+      >
+        {orders.map((o) => (
+          <option key={o.id} value={o.id}>
+            #{o.id} {o.marketplace} {o.external_order_id}
+          </option>
         ))}
-        {!messages.length && customerId && (
-          <p className="muted">No messages — sync happens on open.</p>
-        )}
-      </div>
-      {customerId && (
-        <form className="stack mt-3" onSubmit={send}>
-          <select
-            className="field"
-            value={orderId ?? ""}
-            onChange={(e) => setOrderId(Number(e.target.value))}
-          >
-            {orders.map((o) => (
-              <option key={o.id} value={o.id}>
-                #{o.id} {o.marketplace} {o.external_order_id}
-              </option>
-            ))}
-          </select>
-          <textarea
-            className="field min-h-24 resize-y py-2"
-            rows={3}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Reply via marketplace chat…"
-          />
-          <Button className="button-primary" type="submit" disabled={!orderId || !text.trim()}>
-            Send
-          </Button>
-        </form>
+      </select>
+      <textarea
+        className="field max-h-36 min-h-16 resize-y py-2"
+        rows={2}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Reply via marketplace chat…"
+      />
+      <Button className="button-primary" type="submit" disabled={!orderId || !text.trim()}>
+        Send
+      </Button>
+    </form>
+  ) : null;
+
+  const messageList = (
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
+      {messages.map((m) => (
+        <div key={m.id} className={`msg ${m.direction === "outbound" ? "out" : "in"}`}>
+          <div className="muted">{m.marketplace} · {m.written_at || ""}</div>
+          {m.body}
+        </div>
+      ))}
+      {!messages.length && customerId && (
+        <p className="muted">No messages — sync happens on open.</p>
       )}
+    </div>
+  );
+
+  const desktopThread = (
+    <div className="flex h-full min-h-0 flex-col">
+      <h3 className="mb-3 shrink-0 truncate text-base font-semibold">{title}</h3>
+      {messageList}
+      {composer}
+    </div>
+  );
+
+  const sheetThread = (
+    <div className="flex h-full min-h-0 flex-col">
+      {messageList}
+      <div className="px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1">{composer}</div>
     </div>
   );
 
@@ -189,35 +202,37 @@ export default function InboxPage() {
         <Button className="button-primary" type="submit">Search</Button>
       </form>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(16rem,20rem)_1fr]">
-        <Card className="p-2">
-          {threads.map((t) => (
-            <button
-              key={t.customer_id}
-              type="button"
-              className="mb-1.5 w-full rounded-md border border-transparent p-3 text-left hover:bg-white/5"
-              style={{
-                borderColor: t.customer_id === customerId ? "rgba(255,255,255,0.25)" : undefined,
-                background: t.customer_id === customerId ? "rgba(255,255,255,0.08)" : undefined,
-              }}
-              onClick={() => selectThread(t.customer_id)}
-            >
-              <div className="truncate text-sm font-medium">{t.email || `Customer #${t.customer_id}`}</div>
-              <div className="muted mt-1 line-clamp-2 text-xs">
-                {t.order_count} orders · {t.last_message?.slice(0, 60) || "—"}
-              </div>
-            </button>
-          ))}
-          {!threads.length && <p className="muted p-3">No threads yet.</p>}
-          <div className="pager">
+      <div className="grid gap-4 lg:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] lg:items-stretch">
+        <Card className="flex max-h-[min(28rem,50vh)] flex-col overflow-hidden p-2 lg:max-h-[calc(100vh-12rem)]">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {threads.map((t) => (
+              <button
+                key={t.customer_id}
+                type="button"
+                className="mb-1.5 w-full rounded-md border border-transparent p-3 text-left hover:bg-white/5"
+                style={{
+                  borderColor: t.customer_id === customerId ? "rgba(255,255,255,0.25)" : undefined,
+                  background: t.customer_id === customerId ? "rgba(255,255,255,0.08)" : undefined,
+                }}
+                onClick={() => selectThread(t.customer_id)}
+              >
+                <div className="truncate text-sm font-medium">{t.email || `Customer #${t.customer_id}`}</div>
+                <div className="muted mt-1 line-clamp-2 text-xs">
+                  {t.order_count} orders · {t.last_message?.slice(0, 60) || "—"}
+                </div>
+              </button>
+            ))}
+            {!threads.length && <p className="muted p-3">No threads yet.</p>}
+          </div>
+          <div className="pager shrink-0">
             <Button disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>Prev</Button>
             <span className="muted">{page + 1} / {pageCount} ({total})</span>
             <Button disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>Next</Button>
           </div>
         </Card>
 
-        <Card className="hidden min-h-[28rem] lg:block">
-          {customerId ? threadPane : <Empty title="Select a thread" detail="Customer messages will appear here." />}
+        <Card className="hidden h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden lg:flex">
+          {customerId ? desktopThread : <Empty title="Select a thread" detail="Customer messages will appear here." />}
         </Card>
       </div>
 
@@ -227,8 +242,9 @@ export default function InboxPage() {
         title={title}
         wide
         until="lg"
+        contentClassName="flex flex-col overflow-hidden p-0"
       >
-        {threadPane}
+        {sheetThread}
       </Sheet>
     </div>
   );

@@ -46,3 +46,6 @@ ggsel_top_value: 50
 ggsel_request_retries: 3
 ggsel_retry_timeout: 5
 ggsel_error_threshold: 5
+
+# Lightweight unread debates poll (Digiseller filter_new / GGSel cnt_new)
+inbox_poll_interval_seconds: 120

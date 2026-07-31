@@ -35,9 +35,15 @@ async def inbox(
     )
 
 
+@messages_router.get("/alerts")
+async def message_alerts(limit: int = 50):
+    return await rq.list_active_chat_alerts(limit=limit)
+
+
 @messages_router.get("/customer/{customer_id}")
 async def customer_messages(customer_id: int):
     await messaging.sync_customer_messages(customer_id)
+    await messaging.acknowledge_customer_alerts(customer_id)
     return await rq.list_messages(customer_id=customer_id)
 
 

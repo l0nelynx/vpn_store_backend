@@ -7,6 +7,7 @@ import {
 import { Toaster } from "sonner";
 import { api, clearToken, getToken, restoreSession } from "./api";
 import { Button, cn } from "./components/ui";
+import { NotificationBell } from "./components/NotificationBell";
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const ProductsPage = lazy(() => import("./pages/ProductsPage"));
@@ -178,9 +179,12 @@ function Shell({ children }: { children: ReactNode }) {
             </Button>
             <h1 className="truncate text-sm font-semibold">{titles[location.pathname] || "Store"}</h1>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="h-2 w-2 rounded-full bg-success" />
-            <span className="hidden sm:inline">PostgreSQL</span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <NotificationBell />
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-success" />
+              <span className="hidden sm:inline">PostgreSQL</span>
+            </span>
           </div>
         </header>
         <main className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:p-7">

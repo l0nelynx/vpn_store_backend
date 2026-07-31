@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -123,13 +124,34 @@ class GGSelAdapter:
     async def send_message(self, http: aiohttp.ClientSession, content_id: str | int, message: str) -> None:
         await self._request(http, "POST", "/debates/v2", params={"id_i": content_id}, json={"message": message})
 
-    async def chats(self, http: aiohttp.ClientSession) -> list[dict]:
-        data = await self._request(http, "GET", "/debates/v2/chats")
-        return data if isinstance(data, list) else data.get("chats") or data.get("items") or []
+    async def chats(
+        self,
+        http: aiohttp.ClientSession,
+        *,
+        filter_new: bool = False,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> list[dict]:
+        params: dict[str, Any] = {"page": page, "pagesize": page_size, "pageSize": page_size}
+        if filter_new:
+            params["filter_new"] = 1
+        data = await self._request(http, "GET", "/debates/v2/chats", params=params)
+        rows = data if isinstance(data, list) else data.get("chats") or data.get("items") or []
+        if filter_new:
+            rows = [row for row in rows if int(row.get("cnt_new") or 0) > 0]
+        return rows
 
     async def messages(self, http: aiohttp.ClientSession, content_id: str | int, count: int = 50) -> list[dict]:
         data = await self._request(http, "GET", "/debates/v2", params={"id_i": content_id, "count": count})
         return data if isinstance(data, list) else data.get("items") or data.get("messages") or []
+
+    async def mark_seen(self, http: aiohttp.ClientSession, content_id: str | int) -> None:
+        """Best-effort read flag; GGSel may not expose Digiseller's /seen endpoint."""
+        try:
+            await self._request(http, "POST", "/debates/v2/seen", params={"id_i": content_id}, json={})
+        except ProviderError:
+            # Empty body or unsupported endpoint should not break inbox open.
+            pass
 
 
 class DigisellerAdapter:
@@ -184,10 +206,15 @@ class DigisellerAdapter:
                 if response.status == 401 and attempt == 0:
                     self.cache.clear()
                     continue
-                data = await response.json(content_type=None)
+                raw = await response.read()
                 if response.status >= 400:
                     raise ProviderError(f"Digiseller HTTP {response.status}", status=response.status)
-                return data
+                if not raw.strip():
+                    return {}
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    raise ProviderError(f"Digiseller invalid JSON: {exc}", status=response.status) from exc
         raise ProviderError("Digiseller authorization retry exhausted")
 
     async def purchase(self, http: aiohttp.ClientSession, inv: str | int) -> dict:
@@ -206,13 +233,32 @@ class DigisellerAdapter:
     async def send_message(self, http: aiohttp.ClientSession, inv: str | int, message: str) -> None:
         await self._request(http, "POST", "/debates/v2", params={"id_i": inv}, json={"message": message, "files": []})
 
-    async def chats(self, http: aiohttp.ClientSession) -> list[dict]:
-        data = await self._request(http, "GET", "/debates/v2/chats")
-        return data if isinstance(data, list) else data.get("chats") or data.get("items") or []
+    async def chats(
+        self,
+        http: aiohttp.ClientSession,
+        *,
+        filter_new: bool = False,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> list[dict]:
+        params: dict[str, Any] = {
+            "page": page,
+            "pagesize": page_size,
+            "pageSize": page_size,
+            "filter_new": 1 if filter_new else 0,
+        }
+        data = await self._request(http, "GET", "/debates/v2/chats", params=params)
+        rows = data if isinstance(data, list) else data.get("chats") or data.get("items") or []
+        if filter_new:
+            rows = [row for row in rows if int(row.get("cnt_new") or 0) > 0]
+        return rows
 
     async def messages(self, http: aiohttp.ClientSession, inv: str | int, count: int = 50) -> list[dict]:
         data = await self._request(http, "GET", "/debates/v2", params={"id_i": inv, "count": count})
         return data if isinstance(data, list) else data.get("items") or data.get("messages") or []
+
+    async def mark_seen(self, http: aiohttp.ClientSession, inv: str | int) -> None:
+        await self._request(http, "POST", "/debates/v2/seen", params={"id_i": inv}, json={})
 
     async def permissions(self, http: aiohttp.ClientSession) -> dict[str, Any]:
         # Official Digiseller endpoint: GET /api/token/perms?token=...

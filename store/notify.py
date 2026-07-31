@@ -15,8 +15,23 @@ async def webhook_tg_notify(payment_data, store_name: str):
 
 async def send_tg_alert(message: str, store_name: str):
     logger.info(message)
+    if not bot:
+        return
     await bot.send_message(chat_id=secrets.get('admin_id'),
                            text=f"<b>{store_name} ALERT</b>\n\n"
                                 f"{message}",
                            parse_mode="HTML",
                            disable_notification=True)
+
+
+async def send_inbox_tg_notify(message: str):
+    """Audible admin ping for new marketplace chat unread."""
+    logger.info(message)
+    if not bot:
+        return
+    await bot.send_message(
+        chat_id=secrets.get("admin_id"),
+        text=f"<b>INBOX</b>\n\n{message}",
+        parse_mode="HTML",
+        disable_notification=False,
+    )

@@ -148,6 +148,7 @@ export function Sheet({
   children,
   wide = false,
   until = "md",
+  contentClassName,
 }: {
   open: boolean;
   onClose: () => void;
@@ -156,6 +157,7 @@ export function Sheet({
   wide?: boolean;
   /** Hide the sheet at this breakpoint and above (desktop panel takes over). */
   until?: "md" | "lg" | "xl";
+  contentClassName?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -190,7 +192,14 @@ export function Sheet({
           </Button>
           {title != null && <div className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</div>}
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">{children}</div>
+        <div
+          className={cn(
+            "min-h-0 flex-1",
+            contentClassName ?? "overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]",
+          )}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

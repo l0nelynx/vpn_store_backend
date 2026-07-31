@@ -457,6 +457,32 @@ class Message(Base):
     )
 
 
+class MarketplaceChatAlert(Base):
+    """Snapshot of marketplace unread debates for admin bell + TG alerts."""
+
+    __tablename__ = "marketplace_chat_alerts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    marketplace: Mapped[str] = mapped_column(String(32))
+    chat_id: Mapped[str] = mapped_column(String(100))
+    email: Mapped[str | None] = mapped_column(String(320))
+    cnt_new: Mapped[int] = mapped_column(Integer, default=0)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"))
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
+    last_notified_cnt_new: Mapped[int] = mapped_column(Integer, default=0)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("marketplace", "chat_id", name="uq_marketplace_chat_alerts"),
+        Index("ix_marketplace_chat_alerts_active", "cnt_new", "cleared_at"),
+    )
+
+
 class OrderParam(Base):
     __tablename__ = "order_params"
 
