@@ -120,7 +120,7 @@ export default function InboxPage() {
   }
 
   const composer = customerId ? (
-    <form className="stack shrink-0 border-t bg-background pt-3" onSubmit={send}>
+    <form className="stack shrink-0 border-t border-white/10 pt-3" onSubmit={send}>
       <select
         className="field"
         value={orderId ?? ""}
@@ -133,20 +133,22 @@ export default function InboxPage() {
         ))}
       </select>
       <textarea
-        className="field max-h-36 min-h-16 resize-y py-2"
-        rows={2}
+        className="field min-h-24 resize-y py-2"
+        rows={3}
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Reply via marketplace chat…"
       />
-      <Button className="button-primary" type="submit" disabled={!orderId || !text.trim()}>
-        Send
-      </Button>
+      <div className="flex justify-end">
+        <Button className="button-primary" type="submit" disabled={!orderId || !text.trim()}>
+          Send
+        </Button>
+      </div>
     </form>
   ) : null;
 
   const messageList = (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
+    <div className="thread overscroll-contain">
       {messages.map((m) => (
         <div key={m.id} className={`msg ${m.direction === "outbound" ? "out" : "in"}`}>
           <div className="muted">{m.marketplace} · {m.written_at || ""}</div>
@@ -160,7 +162,7 @@ export default function InboxPage() {
   );
 
   const desktopThread = (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <h3 className="mb-3 shrink-0 truncate text-base font-semibold">{title}</h3>
       {messageList}
       {composer}
@@ -168,9 +170,9 @@ export default function InboxPage() {
   );
 
   const sheetThread = (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
       {messageList}
-      <div className="px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1">{composer}</div>
+      {composer}
     </div>
   );
 
@@ -231,7 +233,7 @@ export default function InboxPage() {
           </div>
         </Card>
 
-        <Card className="hidden h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden lg:flex">
+        <Card className="hidden h-[calc(100vh-12rem)] min-h-[28rem] flex-col overflow-hidden lg:flex">
           {customerId ? desktopThread : <Empty title="Select a thread" detail="Customer messages will appear here." />}
         </Card>
       </div>

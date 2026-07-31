@@ -1,5 +1,6 @@
 import { useEffect, useState, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type ReactNode } from "react";
-import { ChevronDown, X } from "lucide-react";
+import * as SelectPrimitive from "@radix-ui/react-select";
+import { Check, ChevronDown, X } from "lucide-react";
 
 export function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
@@ -15,6 +16,63 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={cn("field", className)} {...props} />;
+}
+
+export function Select({
+  value,
+  onValueChange,
+  placeholder,
+  options,
+  className,
+  "aria-label": ariaLabel,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  placeholder?: string;
+  options: Array<{ value: string; label: string }>;
+  className?: string;
+  "aria-label"?: string;
+}) {
+  return (
+    <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
+      <SelectPrimitive.Trigger
+        aria-label={ariaLabel}
+        className={cn(
+          "field inline-flex items-center justify-between gap-2 bg-card text-left [&[data-placeholder]]:text-muted-foreground",
+          className,
+        )}
+      >
+        <SelectPrimitive.Value placeholder={placeholder} />
+        <SelectPrimitive.Icon>
+          <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+        </SelectPrimitive.Icon>
+      </SelectPrimitive.Trigger>
+      <SelectPrimitive.Portal>
+        <SelectPrimitive.Content
+          position="popper"
+          sideOffset={4}
+          className="z-50 max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border bg-card text-foreground shadow-md"
+        >
+          <SelectPrimitive.Viewport className="p-1">
+            {options.map((option) => (
+              <SelectPrimitive.Item
+                key={option.value}
+                value={option.value}
+                className="relative flex cursor-pointer select-none items-center rounded-sm py-2 pl-8 pr-3 text-sm outline-none data-[highlighted]:bg-white/8 data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+              >
+                <span className="absolute left-2 flex h-4 w-4 items-center justify-center">
+                  <SelectPrimitive.ItemIndicator>
+                    <Check className="h-3.5 w-3.5" />
+                  </SelectPrimitive.ItemIndicator>
+                </span>
+                <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
+              </SelectPrimitive.Item>
+            ))}
+          </SelectPrimitive.Viewport>
+        </SelectPrimitive.Content>
+      </SelectPrimitive.Portal>
+    </SelectPrimitive.Root>
+  );
 }
 
 export function Badge({

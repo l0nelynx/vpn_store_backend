@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from typing import Any, Literal
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -451,6 +452,108 @@ async def analytics_overview():
                 "digiseller_sync_limit_seconds": 12,
                 "step_errors": [{"code": code or "unknown", "count": count} for code, count in step_errors],
                 "providers": [{"provider": provider, "orders": count} for provider, count in providers]}
+
+
+_SERIES_RANGES: dict[str, tuple[timedelta, str, timedelta]] = {
+    # lookback, date_trunc unit, step between buckets
+    "day": (timedelta(hours=24), "hour", timedelta(hours=1)),
+    "week": (timedelta(days=7), "day", timedelta(days=1)),
+    "month": (timedelta(days=30), "day", timedelta(days=1)),
+    "3m": (timedelta(days=90), "week", timedelta(days=7)),
+    "6m": (timedelta(days=180), "week", timedelta(days=7)),
+    "year": (timedelta(days=365), "month", timedelta(days=31)),
+}
+
+
+def _truncate_bucket(moment: datetime, unit: str) -> datetime:
+    moment = moment.astimezone(timezone.utc)
+    if unit == "hour":
+        return moment.replace(minute=0, second=0, microsecond=0)
+    if unit == "day":
+        return moment.replace(hour=0, minute=0, second=0, microsecond=0)
+    if unit == "week":
+        day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        return day - timedelta(days=day.weekday())
+    if unit == "month":
+        return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    raise ValueError(f"unsupported bucket unit: {unit}")
+
+
+def _next_bucket(moment: datetime, unit: str) -> datetime:
+    if unit == "hour":
+        return moment + timedelta(hours=1)
+    if unit == "day":
+        return moment + timedelta(days=1)
+    if unit == "week":
+        return moment + timedelta(days=7)
+    if unit == "month":
+        year, month = moment.year, moment.month + 1
+        if month > 12:
+            year, month = year + 1, 1
+        return moment.replace(year=year, month=month)
+    raise ValueError(f"unsupported bucket unit: {unit}")
+
+
+def _iter_buckets(since: datetime, until: datetime, unit: str) -> list[datetime]:
+    cursor = _truncate_bucket(since, unit)
+    end = _truncate_bucket(until, unit)
+    buckets: list[datetime] = []
+    while cursor <= end:
+        buckets.append(cursor)
+        cursor = _next_bucket(cursor, unit)
+    return buckets
+
+
+@router.get("/analytics/series")
+async def analytics_series(
+    range: Literal["day", "week", "month", "3m", "6m", "year"] = Query("week"),
+    metric: Literal["orders", "revenue"] = Query("orders"),
+):
+    lookback, unit, _ = _SERIES_RANGES[range]
+    now = datetime.now(timezone.utc)
+    since = now - lookback
+    bucket_expr = func.date_trunc(unit, Order.created_at)
+    value_expr = (
+        func.count(Order.id)
+        if metric == "orders"
+        else func.coalesce(func.sum(Order.net_rub), 0)
+    )
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(bucket_expr.label("bucket"), Order.marketplace, value_expr.label("value"))
+                .where(Order.created_at >= since)
+                .group_by(bucket_expr, Order.marketplace)
+                .order_by(bucket_expr)
+            )
+        ).all()
+
+    by_bucket: dict[datetime, dict[str, float]] = {}
+    for bucket, marketplace, value in rows:
+        if bucket is None or not marketplace:
+            continue
+        key = bucket if bucket.tzinfo else bucket.replace(tzinfo=timezone.utc)
+        key = key.astimezone(timezone.utc)
+        cell = by_bucket.setdefault(key, {"ggsel": 0.0, "digiseller": 0.0})
+        market = str(marketplace).lower()
+        if market not in cell:
+            cell[market] = 0.0
+        amount = float(value) if isinstance(value, (int, float, Decimal)) else float(value or 0)
+        cell[market] = amount
+
+    series = []
+    for bucket in _iter_buckets(since, now, unit):
+        cell = by_bucket.get(bucket, {"ggsel": 0.0, "digiseller": 0.0})
+        point = {
+            "bucket": bucket.isoformat(),
+            "ggsel": cell.get("ggsel", 0.0),
+            "digiseller": cell.get("digiseller", 0.0),
+        }
+        for market, amount in cell.items():
+            if market not in point:
+                point[market] = amount
+        series.append(point)
+    return {"range": range, "metric": metric, "series": series}
 
 
 @router.get("/templates")

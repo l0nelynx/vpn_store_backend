@@ -50,7 +50,13 @@
   .button { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-white/8 disabled:pointer-events-none disabled:opacity-50; }
   .button-primary { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-transparent bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-white/85 disabled:pointer-events-none disabled:opacity-50; }
   .button-ghost { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-transparent bg-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-50; }
-  .field { @apply h-10 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-white/25 md:h-9; }
+  .field { @apply h-10 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-white/25 md:h-9; }
+  /* Native <select> dropdowns on Windows ignore color-scheme for options; force readable colors. */
+  select.field { @apply bg-card; }
+  select.field option, select.field optgroup {
+    background-color: var(--card);
+    color: var(--foreground);
+  }
   .primary { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-transparent bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-white/85 disabled:pointer-events-none disabled:opacity-50; }
   .filters { @apply flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center; }
   .label { @apply mb-1.5 block text-xs font-medium text-muted-foreground; }
@@ -69,7 +75,7 @@
   .login-card { @apply w-full max-w-sm; }
   .msg { @apply mb-2 max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted p-3; }
   .msg.out { @apply ml-auto bg-emerald-950/50; }
-  .thread { @apply max-h-[55vh] overflow-auto p-2; }
+  .thread { @apply min-h-0 flex-1 overflow-auto p-2; }
   .param-row { @apply mb-1 flex flex-wrap items-center gap-2 rounded-md border bg-white/2 p-2; }
   .tree-node { @apply mb-2 rounded-md border bg-white/3 p-2; }
   .tree-node.nested { @apply ml-2 bg-white/2 sm:ml-3; }
