@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { Button, Card, DataList, DetailRow, ListCard } from "../components/ui";
 
 type ValueMapping = {
   id: number;
@@ -91,96 +92,127 @@ export default function MappingsPage() {
   }
 
   return (
-    <div>
-      <div className="row" style={{ marginBottom: "1rem" }}>
-        <h2 style={{ margin: 0, flex: 1 }}>Mappings</h2>
-        <select
-          value={filterType}
-          onChange={(e) => {
-            setFilterType(e.target.value);
-            load(e.target.value || undefined);
-          }}
-        >
-          <option value="">all types</option>
-          {TYPES.map((t) => (
-            <option key={t} value={t}>{t}</option>
-          ))}
-        </select>
-        <button className="primary" onClick={() => openCreate(filterType || "days")}>
-          Add mapping
-        </button>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="page-title">Mappings</h2>
+        <div className="flex flex-wrap gap-2">
+          <select
+            className="field sm:w-auto"
+            value={filterType}
+            onChange={(e) => {
+              setFilterType(e.target.value);
+              load(e.target.value || undefined);
+            }}
+          >
+            <option value="">all types</option>
+            {TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+          <Button className="button-primary" onClick={() => openCreate(filterType || "days")}>
+            Add mapping
+          </Button>
+        </div>
       </div>
       <p className="muted">
         Human-readable labels for technical values used in Parameters (days, squads, hwid, …).
       </p>
       {error && <p className="error">{error}</p>}
 
-      {!items.length && <div className="card muted">No mappings yet.</div>}
+      {!items.length && <Card className="muted">No mappings yet.</Card>}
 
       {grouped.map(([type, rows]) => {
         if (filterType && type !== filterType) return null;
         return (
-          <div key={type} className="card" style={{ marginBottom: "0.75rem" }}>
-            <div className="row" style={{ marginBottom: "0.5rem" }}>
-              <span
-                className="tag"
-                style={{ background: `${TYPE_COLORS[type] || "#666"}33` }}
-              >
+          <Card key={type} className="space-y-3">
+            <div className="row">
+              <span className="tag" style={{ background: `${TYPE_COLORS[type] || "#666"}33` }}>
                 {type}
               </span>
               <span className="muted">{rows.length} values</span>
-              <button className="tree-add" onClick={() => openCreate(type)}>+</button>
+              <button type="button" className="tree-add" onClick={() => openCreate(type)}>+</button>
             </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Label</th>
-                  <th>Value</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((m) => (
-                  <tr key={m.id}>
-                    <td>{m.label}</td>
-                    <td><code>{m.value}</code></td>
-                    <td>
-                      <button onClick={() => openEdit(m)}>Edit</button>{" "}
-                      <button onClick={() => onDelete(m.id)}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-                {!rows.length && (
-                  <tr><td colSpan={3} className="muted">Empty</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+            <DataList
+              table={
+                <div className="overflow-x-auto">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Label</th>
+                        <th>Value</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((m) => (
+                        <tr key={m.id}>
+                          <td>{m.label}</td>
+                          <td><code>{m.value}</code></td>
+                          <td>
+                            <Button className="h-8" onClick={() => openEdit(m)}>Edit</Button>{" "}
+                            <Button className="h-8" onClick={() => onDelete(m.id)}>Delete</Button>
+                          </td>
+                        </tr>
+                      ))}
+                      {!rows.length && (
+                        <tr><td colSpan={3} className="muted">Empty</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              }
+              cards={rows.map((m) => (
+                <ListCard
+                  key={m.id}
+                  title={m.label}
+                  subtitle={<code className="text-xs">{m.value}</code>}
+                  details={<DetailRow label="Value"><code className="break-all">{m.value}</code></DetailRow>}
+                  actions={
+                    <>
+                      <Button onClick={() => openEdit(m)}>Edit</Button>
+                      <Button onClick={() => onDelete(m.id)}>Delete</Button>
+                    </>
+                  }
+                />
+              ))}
+            />
+          </Card>
         );
       })}
 
       {modal && (
         <div className="modal-backdrop" onClick={() => setModal(null)}>
-          <form className="card modal stack" onClick={(e) => e.stopPropagation()} onSubmit={onSave}>
-            <h3 style={{ margin: 0 }}>{editing ? "Edit Mapping" : "New Mapping"}</h3>
-            <label className="muted">Type
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+          <form className="modal stack" onClick={(e) => e.stopPropagation()} onSubmit={onSave}>
+            <h3 className="m-0 text-base font-semibold">{editing ? "Edit Mapping" : "New Mapping"}</h3>
+            <label className="muted">
+              Type
+              <select className="field mt-1" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
                 {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </label>
-            <label className="muted">Label
-              <input required value={form.label}
+            <label className="muted">
+              Label
+              <input
+                className="field mt-1"
+                required
+                value={form.label}
                 onChange={(e) => setForm({ ...form, label: e.target.value })}
-                placeholder="e.g. 1 month" />
+                placeholder="e.g. 1 month"
+              />
             </label>
-            <label className="muted">Value
-              <input required value={form.value}
+            <label className="muted">
+              Value
+              <input
+                className="field mt-1"
+                required
+                value={form.value}
                 onChange={(e) => setForm({ ...form, value: e.target.value })}
-                placeholder="e.g. 30 or squad UUID" />
+                placeholder="e.g. 30 or squad UUID"
+              />
             </label>
             <div className="row">
-              <button type="button" onClick={() => setModal(null)}>Cancel</button>
-              <button className="primary" type="submit">Save</button>
+              <Button type="button" onClick={() => setModal(null)}>Cancel</Button>
+              <Button className="button-primary" type="submit">Save</Button>
             </div>
           </form>
         </div>

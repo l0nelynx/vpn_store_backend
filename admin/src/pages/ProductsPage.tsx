@@ -54,9 +54,9 @@ export default function ProductsPage() {
           <div><h3 className="font-medium">{product.name}</h3><code className="text-xs text-muted-foreground">{product.key}</code></div>
           <Badge tone={product.status === "active" ? "success" : "warning"}>{product.status}</Badge>
         </div>
-        <div className="space-y-2">{product.bindings.map((binding) => <div key={binding.id} className="flex items-center justify-between rounded-md border bg-white/2 p-3 text-sm">
-          <span className="flex items-center gap-2"><Link2 className="h-4 w-4 text-muted-foreground" /><b>{binding.provider}</b> #{binding.external_item_id} <code className="text-[10px] text-muted-foreground">binding:{binding.id}</code></span>
-          <div className="flex gap-2"><Badge tone={binding.status === "active" ? "success" : "warning"}>{binding.status}</Badge>{binding.published_pipeline_version_id && <Badge>v{binding.published_pipeline_version_id}</Badge>}</div>
+        <div className="space-y-2">{product.bindings.map((binding) => <div key={binding.id} className="flex flex-col gap-2 rounded-md border bg-white/2 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <span className="flex min-w-0 flex-wrap items-center gap-2"><Link2 className="h-4 w-4 shrink-0 text-muted-foreground" /><b>{binding.provider}</b> #{binding.external_item_id} <code className="text-[10px] text-muted-foreground">binding:{binding.id}</code></span>
+          <div className="flex flex-wrap gap-2"><Badge tone={binding.status === "active" ? "success" : "warning"}>{binding.status}</Badge>{binding.published_pipeline_version_id && <Badge>v{binding.published_pipeline_version_id}</Badge>}</div>
         </div>)}{!product.bindings.length && <p className="muted">No marketplace bindings.</p>}</div>
         <Button className="w-full border-dashed" onClick={() => addBinding(product.id)}><Plus className="h-4 w-4" />Add marketplace binding</Button>
       </Card>)}

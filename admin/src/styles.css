@@ -47,10 +47,12 @@
 
 @layer components {
   .card { @apply rounded-lg border bg-card p-4 shadow-sm; }
-  .button { @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-white/8 disabled:pointer-events-none disabled:opacity-50; }
-  .button-primary { @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-transparent bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-white/85 disabled:pointer-events-none disabled:opacity-50; }
-  .button-ghost { @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-transparent bg-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-50; }
-  .field { @apply h-9 rounded-md border border-input bg-transparent px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-white/25; }
+  .button { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-white/8 disabled:pointer-events-none disabled:opacity-50; }
+  .button-primary { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-transparent bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-white/85 disabled:pointer-events-none disabled:opacity-50; }
+  .button-ghost { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-transparent bg-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-white/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-50; }
+  .field { @apply h-10 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-white/25 md:h-9; }
+  .primary { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-transparent bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-white/85 disabled:pointer-events-none disabled:opacity-50; }
+  .filters { @apply flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center; }
   .label { @apply mb-1.5 block text-xs font-medium text-muted-foreground; }
   .badge { @apply inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium; }
   .page-title { @apply text-xl font-semibold tracking-tight; }
@@ -63,21 +65,21 @@
   td { @apply border-b border-white/7 px-3 py-3 align-top; }
   .tag { @apply inline-flex items-center rounded-full border bg-white/5 px-2 py-0.5 text-[11px] font-medium; }
   .pager { @apply mt-4 flex items-center justify-center gap-3; }
-  .login-wrap { @apply grid min-h-screen place-items-center p-6; }
+  .login-wrap { @apply grid min-h-screen place-items-center p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]; }
   .login-card { @apply w-full max-w-sm; }
-  .msg { @apply mb-2 max-w-[80%] whitespace-pre-wrap rounded-lg bg-muted p-3; }
+  .msg { @apply mb-2 max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted p-3; }
   .msg.out { @apply ml-auto bg-emerald-950/50; }
   .thread { @apply max-h-[55vh] overflow-auto p-2; }
+  .param-row { @apply mb-1 flex flex-wrap items-center gap-2 rounded-md border bg-white/2 p-2; }
   .tree-node { @apply mb-2 rounded-md border bg-white/3 p-2; }
-  .tree-node.nested { @apply ml-3 bg-white/2; }
-  .tree-head { @apply flex cursor-pointer items-center gap-2 p-2; }
+  .tree-node.nested { @apply ml-2 bg-white/2 sm:ml-3; }
+  .tree-head { @apply flex cursor-pointer flex-wrap items-center gap-2 p-2; }
   .tree-caret, .tree-label { @apply text-xs text-muted-foreground; }
   .tree-value { @apply font-mono text-sm font-semibold; }
   .tree-children { @apply pl-3; }
   .tree-add { @apply ml-auto inline-flex h-7 items-center justify-center rounded-md border border-transparent px-2 text-sm text-muted-foreground hover:bg-white/8 hover:text-foreground; }
-  .param-row { @apply mb-1 flex items-center gap-2 rounded-md border bg-white/2 p-2; }
-  .modal-backdrop { @apply fixed inset-0 z-50 grid place-items-center bg-black/70 p-4; }
-  .modal { @apply w-full max-w-lg rounded-lg border bg-card p-4 shadow-sm; }
+  .modal-backdrop { @apply fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/70 p-4; }
+  .modal { @apply my-auto w-full max-w-lg max-h-[min(90vh,720px)] overflow-y-auto rounded-lg border bg-card p-4 shadow-sm; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

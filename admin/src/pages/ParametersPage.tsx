@@ -301,27 +301,29 @@ export default function ParametersPage() {
   }
 
   return (
-    <div>
-      <div className="row" style={{ marginBottom: "1rem" }}>
-        <h2 style={{ margin: 0, flex: 1 }}>Parameters</h2>
-        <input
-          placeholder="Filter by Item ID"
-          value={filterItemId}
-          onChange={(e) => setFilterItemId(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && load(filterItemId || undefined)}
-          style={{ width: 160 }}
-        />
-        <button onClick={() => load(filterItemId || undefined)}>Filter</button>
-        <button onClick={syncOptions} disabled={syncing}>
-          {syncing ? "Syncing…" : "Sync options from products"}
-        </button>
-        <button className="primary" onClick={() => openCreate()}>Add Parameter</button>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <h2 className="page-title">Parameters</h2>
+        <div className="filters">
+          <input
+            className="field sm:max-w-[10rem]"
+            placeholder="Filter by Item ID"
+            value={filterItemId}
+            onChange={(e) => setFilterItemId(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && load(filterItemId || undefined)}
+          />
+          <button className="button" type="button" onClick={() => load(filterItemId || undefined)}>Filter</button>
+          <button className="button" type="button" onClick={syncOptions} disabled={syncing}>
+            {syncing ? "Syncing…" : "Sync options from products"}
+          </button>
+          <button className="button-primary" type="button" onClick={() => openCreate()}>Add Parameter</button>
+        </div>
       </div>
       <p className="muted">
         Tree merges marketplace option names (API v1) with your mappings. Assign values from{" "}
         <Link to="/value-mappings">Mappings</Link>; manual Add still works.
       </p>
-      {msg && <p className="muted" style={{ wordBreak: "break-all" }}>{msg}</p>}
+      {msg && <p className="muted break-all">{msg}</p>}
       {error && <p className="error">{error}</p>}
 
       {!tree.length && (
@@ -342,12 +344,12 @@ export default function ParametersPage() {
           : `item_id ${item.itemId}`;
         return (
           <div key={item.itemId} className="tree-node">
-            <div className="tree-head" onClick={() => toggleItem(item.itemId)}>
+            <div className="tree-head flex-wrap" onClick={() => toggleItem(item.itemId)}>
               <span className="tree-caret">{itemOpen ? "▼" : "▶"}</span>
               <span className="tree-label">item</span>
-              <span className="tree-value">{itemTitle}</span>
+              <span className="tree-value min-w-0 break-words">{itemTitle}</span>
               {item.marketplace && <span className="tag">{item.marketplace}</span>}
-              <span className="muted" style={{ marginLeft: 8 }}>
+              <span className="muted w-full text-xs sm:ml-2 sm:w-auto">
                 {item.params.length} options / {variantCount} variants / {mappedCount} mapped
               </span>
               <button
@@ -394,12 +396,13 @@ export default function ParametersPage() {
                               ? `${udg.variantName} (${udg.userDataId})`
                               : `user_data_id ${udg.userDataId}`;
                             return (
-                              <div key={udg.userDataId} style={{ marginBottom: 8 }}>
-                                <div className="row" style={{ marginBottom: 4 }}>
+                              <div key={udg.userDataId} className="mb-2">
+                                <div className="row mb-1">
                                   <span className="tree-label">variant</span>
-                                  <span className="tree-value">{vTitle}</span>
+                                  <span className="tree-value min-w-0 break-words">{vTitle}</span>
                                   <span className="muted">({udg.params.length} mapped)</span>
                                   <button
+                                    type="button"
                                     className="tree-add"
                                     onClick={() =>
                                       openCreate({
@@ -412,6 +415,8 @@ export default function ParametersPage() {
                                     {udg.params.length ? "+" : "Assign"}
                                   </button>
                                   <button
+                                    type="button"
+                                    className="button h-8"
                                     onClick={() =>
                                       onDeleteVariant(
                                         item.itemId,
@@ -434,12 +439,12 @@ export default function ParametersPage() {
                                       >
                                         {p.type}
                                       </span>
-                                      <code style={{ flex: 1 }}>
+                                      <code className="min-w-0 flex-1 break-all">
                                         {lbl ? `${lbl} → ${p.data}` : p.data}
                                       </code>
                                       <span className="muted">#{p.id}</span>
-                                      <button onClick={() => openEdit(p)}>Edit</button>
-                                      <button onClick={() => onDelete(p.id)}>Delete</button>
+                                      <button type="button" className="button h-8" onClick={() => openEdit(p)}>Edit</button>
+                                      <button type="button" className="button h-8" onClick={() => onDelete(p.id)}>Delete</button>
                                     </div>
                                   );
                                 })}
@@ -464,22 +469,23 @@ export default function ParametersPage() {
 
       {modal && (
         <div className="modal-backdrop" onClick={() => setModal(null)}>
-          <form className="card modal stack" onClick={(e) => e.stopPropagation()} onSubmit={onSave}>
-            <h3 style={{ margin: 0 }}>{editing ? "Edit Parameter" : "Assign / New Parameter"}</h3>
+          <form className="modal stack" onClick={(e) => e.stopPropagation()} onSubmit={onSave}>
+            <h3 className="m-0 text-base font-semibold">{editing ? "Edit Parameter" : "Assign / New Parameter"}</h3>
             <label className="muted">Item ID
-              <input required value={form.item_id}
+              <input className="field mt-1" required value={form.item_id}
                 onChange={(e) => setForm({ ...form, item_id: e.target.value })} />
             </label>
             <label className="muted">Param ID
-              <input required value={form.param_id}
+              <input className="field mt-1" required value={form.param_id}
                 onChange={(e) => setForm({ ...form, param_id: e.target.value })} />
             </label>
             <label className="muted">User Data ID
-              <input required value={form.user_data_id}
+              <input className="field mt-1" required value={form.user_data_id}
                 onChange={(e) => setForm({ ...form, user_data_id: e.target.value })} />
             </label>
             <label className="muted">Type
               <select
+                className="field mt-1"
                 value={form.type}
                 onChange={(e) => {
                   const type = e.target.value;
@@ -492,6 +498,7 @@ export default function ParametersPage() {
             </label>
             <label className="muted">Value source
               <select
+                className="field mt-1"
                 value={dataMode}
                 onChange={(e) => setDataMode(e.target.value as "pick" | "custom")}
               >
@@ -502,6 +509,7 @@ export default function ParametersPage() {
             {dataMode === "pick" ? (
               <label className="muted">Mapping
                 <select
+                  className="field mt-1"
                   required
                   value={form.data}
                   onChange={(e) => setForm({ ...form, data: e.target.value })}
@@ -516,7 +524,7 @@ export default function ParametersPage() {
               </label>
             ) : (
               <label className="muted">Data
-                <input required value={form.data}
+                <input className="field mt-1" required value={form.data}
                   onChange={(e) => setForm({ ...form, data: e.target.value })} />
               </label>
             )}
@@ -524,8 +532,8 @@ export default function ParametersPage() {
               <p className="muted">No mappings for this type — add them under Mappings, or use Custom.</p>
             )}
             <div className="row">
-              <button type="button" onClick={() => setModal(null)}>Cancel</button>
-              <button className="primary" type="submit">Save</button>
+              <button className="button" type="button" onClick={() => setModal(null)}>Cancel</button>
+              <button className="button-primary" type="submit">Save</button>
             </div>
           </form>
         </div>
