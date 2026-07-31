@@ -215,7 +215,8 @@ class DigisellerAdapter:
         return data if isinstance(data, list) else data.get("items") or data.get("messages") or []
 
     async def permissions(self, http: aiohttp.ClientSession) -> dict[str, Any]:
-        path = str(secrets.get("dig_permissions_path") or "/token/get-permissions")
+        # Official Digiseller endpoint: GET /api/token/perms?token=...
+        path = str(secrets.get("dig_permissions_path") or "/token/perms")
         data = await self._request(http, "GET", path)
         return data if isinstance(data, dict) else {"permissions": data}
 

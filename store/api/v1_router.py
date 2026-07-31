@@ -421,11 +421,20 @@ async def analytics_overview():
         providers = (
             await session.execute(select(Order.marketplace, func.count(Order.id)).group_by(Order.marketplace))
         ).all()
+        # Digiseller 12s SLA is the sync wall (run_before_response), not full async run lifetime.
         p95_digiseller = await session.scalar(text(
-            "SELECT percentile_cont(0.95) WITHIN GROUP "
-            "(ORDER BY EXTRACT(EPOCH FROM (pr.completed_at - pr.started_at))) "
-            "FROM pipeline_runs pr JOIN orders o ON o.id=pr.order_id "
-            "WHERE o.marketplace='digiseller' AND pr.completed_at IS NOT NULL AND pr.started_at IS NOT NULL"
+            "SELECT percentile_cont(0.95) WITHIN GROUP (ORDER BY sync_seconds) FROM ("
+            "  SELECT SUM(EXTRACT(EPOCH FROM (psr.completed_at - psr.started_at))) AS sync_seconds"
+            "  FROM pipeline_runs pr"
+            "  JOIN orders o ON o.id = pr.order_id"
+            "  JOIN pipeline_step_runs psr ON psr.run_id = pr.id"
+            "  JOIN pipeline_steps ps ON ps.id = psr.step_id"
+            "  WHERE o.marketplace = 'digiseller'"
+            "    AND ps.run_before_response IS TRUE"
+            "    AND psr.started_at IS NOT NULL"
+            "    AND psr.completed_at IS NOT NULL"
+            "  GROUP BY pr.id"
+            ") sync_walls"
         ))
         step_errors = (
             await session.execute(
@@ -547,12 +556,16 @@ async def integration_health():
             try:
                 await adapter.token(http)
                 result[name] = {"ok": True, "token_valid_until": adapter.cache.valid_until}
-                if name == "digiseller":
-                    permissions = await adapter.permissions(http)
-                    result[name]["permissions"] = permissions
-                    result[name]["required_permissions"] = ["view_invoice", "debates_write", "token_get_perms"]
             except Exception as exc:
                 result[name] = {"ok": False, "error": str(exc)}
+                continue
+            if name == "digiseller" and result[name].get("ok"):
+                result[name]["required_permissions"] = ["view_invoice", "debates_write", "token_get_perms"]
+                try:
+                    result[name]["permissions"] = await digiseller.permissions(http)
+                except Exception as exc:
+                    # Auth already succeeded; permissions is diagnostic-only.
+                    result[name]["permissions_error"] = str(exc)
     return result
 
 

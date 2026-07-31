@@ -6,7 +6,13 @@ import { Badge, Button, Card, DataList, DetailRow, ListCard } from "../component
 type Health = {
   database: { ok: boolean; driver?: string };
   ggsel: { ok?: boolean; token_valid_until?: number; error?: string };
-  digiseller: { ok?: boolean; token_valid_until?: number; permissions?: object; error?: string };
+  digiseller: {
+    ok?: boolean;
+    token_valid_until?: number;
+    permissions?: object;
+    permissions_error?: string;
+    error?: string;
+  };
   checkpoints?: { provider: string; stream: string; last_success_at: string | null; gap_detected: boolean; detail: string | null }[];
   outbox?: Record<string, number>;
 };
@@ -123,6 +129,12 @@ export default function IntegrationsPage() {
           <pre className="mt-3 overflow-auto rounded-md bg-black/25 p-3 text-xs text-muted-foreground">
             {JSON.stringify(health.digiseller.permissions, null, 2)}
           </pre>
+        </Card>
+      )}
+      {health?.digiseller.permissions_error && (
+        <Card>
+          <h3 className="font-medium">Digiseller permissions</h3>
+          <p className="error mt-2">{health.digiseller.permissions_error}</p>
         </Card>
       )}
     </div>
