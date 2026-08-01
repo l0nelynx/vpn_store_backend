@@ -285,7 +285,7 @@ async def live_test_pipeline_version(version_id: int, body: LiveTestBody, auth=D
         elif applicable:
             output_names = list((step.config.get("outputs") or {}).keys())
             if step.type == "remnawave.provision_subscription":
-                output_names = ["uuid", "username", "subscription_url", "days"]
+                output_names = ["id", "user_id", "username", "subscription_url", "days"]
             outputs = {name: f"<preview:{step.key}.{name}>" for name in output_names}
         context["steps"][step.key] = {"status": "succeeded" if did_execute else "previewed", "outputs": outputs}
         rendered_steps.append({
@@ -399,6 +399,7 @@ async def v1_orders(provider: str | None = None, status: str | None = None, limi
                  "invoice_id": o.invoice_id, "content_id": o.content_id, "item_id": o.item_id,
                  "status": o.normalized_status, "buyer_email": o.buyer_email,
                  "gross_rub": o.gross_rub, "net_rub": o.net_rub, "currency": o.currency,
+                 "remnawave_user_id": o.remnawave_user_id,
                  "remnawave_uuid": o.remnawave_uuid, "pipeline_version_id": o.pipeline_version_id,
                  "created_at": o.created_at.isoformat()} for o in rows]
 

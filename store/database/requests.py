@@ -229,6 +229,7 @@ async def add_subscription_event(
     event_type: str,
     *,
     days: int | None = None,
+    remnawave_user_id: int | None = None,
     remnawave_uuid: str | None = None,
     detail: str | None = None,
     session=None,
@@ -238,6 +239,7 @@ async def add_subscription_event(
             order_id=order_id,
             event_type=event_type,
             days=days,
+            remnawave_user_id=remnawave_user_id,
             remnawave_uuid=remnawave_uuid,
             detail=detail,
         )
@@ -252,6 +254,7 @@ def _orders_filter_stmt(
     *,
     email: str | None = None,
     marketplace: str | None = None,
+    remnawave_user_id: int | None = None,
     remnawave_uuid: str | None = None,
     remnawave_username: str | None = None,
     external_order_id: str | None = None,
@@ -263,6 +266,8 @@ def _orders_filter_stmt(
         stmt = stmt.where(Customer.email_normalized == norm)
     if marketplace:
         stmt = stmt.where(Order.marketplace == marketplace)
+    if remnawave_user_id is not None:
+        stmt = stmt.where(Order.remnawave_user_id == remnawave_user_id)
     if remnawave_uuid:
         stmt = stmt.where(Order.remnawave_uuid == remnawave_uuid)
     if remnawave_username:
@@ -276,16 +281,17 @@ def _orders_filter_stmt(
         qq = q.strip()
         if qq:
             like = f"%{qq}%"
-            stmt = stmt.where(
-                or_(
-                    Order.external_order_id == qq,
-                    Order.invoice_id == qq,
-                    Order.external_order_id.ilike(like),
-                    Order.invoice_id.ilike(like),
-                    Customer.email.ilike(like),
-                    Customer.email_normalized.ilike(like),
-                )
-            )
+            clauses = [
+                Order.external_order_id == qq,
+                Order.invoice_id == qq,
+                Order.external_order_id.ilike(like),
+                Order.invoice_id.ilike(like),
+                Customer.email.ilike(like),
+                Customer.email_normalized.ilike(like),
+            ]
+            if qq.isdigit():
+                clauses.append(Order.remnawave_user_id == int(qq))
+            stmt = stmt.where(or_(*clauses))
     return stmt
 
 
@@ -301,6 +307,7 @@ async def list_orders(
     *,
     email: str | None = None,
     marketplace: str | None = None,
+    remnawave_user_id: int | None = None,
     remnawave_uuid: str | None = None,
     remnawave_username: str | None = None,
     external_order_id: str | None = None,
@@ -315,6 +322,7 @@ async def list_orders(
         stmt = _orders_filter_stmt(
             email=email,
             marketplace=marketplace,
+            remnawave_user_id=remnawave_user_id,
             remnawave_uuid=remnawave_uuid,
             remnawave_username=remnawave_username,
             external_order_id=external_order_id,
@@ -336,6 +344,7 @@ async def get_customer_360(
     *,
     email: str | None = None,
     customer_id: int | None = None,
+    remnawave_user_id: int | None = None,
     remnawave_uuid: str | None = None,
     session=None,
 ) -> dict | None:
@@ -348,6 +357,12 @@ async def get_customer_360(
             customer = await s.scalar(
                 select(Customer).where(Customer.email_normalized == norm)
             )
+        elif remnawave_user_id is not None:
+            order = await s.scalar(
+                select(Order).where(Order.remnawave_user_id == remnawave_user_id).limit(1)
+            )
+            if order and order.customer_id:
+                customer = await s.get(Customer, order.customer_id)
         elif remnawave_uuid:
             order = await s.scalar(
                 select(Order).where(Order.remnawave_uuid == remnawave_uuid).limit(1)
@@ -377,6 +392,7 @@ async def get_customer_360(
 
 async def resolve_recipients(
     *,
+    remnawave_user_ids: list[int] | None = None,
     remnawave_uuids: list[str] | None = None,
     usernames: list[str] | None = None,
     emails: list[str] | None = None,
@@ -386,6 +402,8 @@ async def resolve_recipients(
     async with get_session(session) as s:
         found: dict[int, dict] = {}
         clauses = []
+        if remnawave_user_ids:
+            clauses.append(Order.remnawave_user_id.in_(remnawave_user_ids))
         if remnawave_uuids:
             clauses.append(Order.remnawave_uuid.in_(remnawave_uuids))
         if usernames:
@@ -417,6 +435,7 @@ async def resolve_recipients(
                 "marketplace": order.marketplace,
                 "external_order_id": order.external_order_id,
                 "chat_id": order.chat_id or order.external_order_id,
+                "remnawave_user_id": order.remnawave_user_id,
                 "remnawave_uuid": order.remnawave_uuid,
                 "remnawave_username": order.remnawave_username,
                 "email": customer.email if customer else None,
@@ -448,6 +467,7 @@ def _order_dict(order: Order, customer: Customer | None = None) -> dict:
         "chat_id": order.chat_id,
         "days_ordered": order.days_ordered,
         "remnawave_username": order.remnawave_username,
+        "remnawave_user_id": order.remnawave_user_id,
         "remnawave_uuid": order.remnawave_uuid,
         "subscription_url": order.subscription_url,
         "customer_id": order.customer_id,
@@ -782,6 +802,7 @@ async def count_orders(
     *,
     email: str | None = None,
     marketplace: str | None = None,
+    remnawave_user_id: int | None = None,
     remnawave_uuid: str | None = None,
     remnawave_username: str | None = None,
     external_order_id: str | None = None,
@@ -792,6 +813,7 @@ async def count_orders(
         stmt = _orders_filter_stmt(
             email=email,
             marketplace=marketplace,
+            remnawave_user_id=remnawave_user_id,
             remnawave_uuid=remnawave_uuid,
             remnawave_username=remnawave_username,
             external_order_id=external_order_id,

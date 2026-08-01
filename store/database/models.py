@@ -224,6 +224,8 @@ class Order(TimestampMixin, Base):
     chat_id: Mapped[str | None] = mapped_column(String(100))
     days_ordered: Mapped[int | None] = mapped_column(Integer)
     remnawave_username: Mapped[str | None] = mapped_column(String(100), index=True)
+    remnawave_user_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    # Kept only to read pre-v3 history. Remnawave 3 removed the user UUID.
     remnawave_uuid: Mapped[str | None] = mapped_column(String(100), index=True)
     subscription_url: Mapped[str | None] = mapped_column(String(1000))
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
@@ -302,6 +304,8 @@ class SubscriptionEvent(Base):
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
     event_type: Mapped[str] = mapped_column(String(50))
     days: Mapped[int | None] = mapped_column(Integer)
+    remnawave_user_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Legacy Remnawave <=2 identifier.
     remnawave_uuid: Mapped[str | None] = mapped_column(String(100))
     detail: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

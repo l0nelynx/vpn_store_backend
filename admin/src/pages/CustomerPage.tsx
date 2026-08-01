@@ -12,6 +12,7 @@ type Customer360 = {
     marketplace: string;
     external_order_id: string;
     remnawave_username: string | null;
+    remnawave_user_id: number | null;
     remnawave_uuid: string | null;
     subscription_url: string | null;
     status: string;
@@ -56,7 +57,10 @@ export default function CustomerPage() {
                     <td>{o.id}</td>
                     <td>{o.marketplace}</td>
                     <td>{o.external_order_id}</td>
-                    <td className="break-all">{o.remnawave_username}</td>
+                    <td className="break-all">
+                      {o.remnawave_username}
+                      {o.remnawave_user_id != null && <span className="muted"> · #{o.remnawave_user_id}</span>}
+                    </td>
                     <td>{o.created_at}</td>
                   </tr>
                 ))}
@@ -74,6 +78,7 @@ export default function CustomerPage() {
               details={
                 <>
                   <DetailRow label="RW">{o.remnawave_username || "—"}</DetailRow>
+                  <DetailRow label="RW ID">{o.remnawave_user_id ?? "—"}</DetailRow>
                   <DetailRow label="Status">{o.status}</DetailRow>
                   <DetailRow label="Created">{o.created_at || "—"}</DetailRow>
                 </>

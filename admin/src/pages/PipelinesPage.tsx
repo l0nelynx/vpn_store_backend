@@ -117,7 +117,7 @@ export default function PipelinesPage() {
     const selectedIndex = steps.findIndex((step) => step.key === selectedKey);
     for (const producer of steps.slice(0, Math.max(0, selectedIndex))) {
       const configured = Object.keys((producer.config.outputs as Record<string, unknown> | undefined) || {});
-      const known = producer.type === "remnawave.provision_subscription" ? ["uuid", "username", "subscription_url", "days"] : configured;
+      const known = producer.type === "remnawave.provision_subscription" ? ["id", "user_id", "username", "subscription_url", "days"] : configured;
       for (const output of known) base.push(`steps.${producer.key}.outputs.${output}`);
     }
     return [...new Set(base)];

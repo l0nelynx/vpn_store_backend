@@ -9,6 +9,7 @@ import socket
 
 from aiogram import Dispatcher
 
+from store.api.remnawave.users_bulk import backfill_order_user_ids
 from store.database.models import async_main
 from store.services.messaging import poll_unread_chats
 from store.services.order_sync import sync_ggsel_orders
@@ -57,6 +58,12 @@ async def main() -> None:
     await async_main()
     await bootstrap_templates()
     await bootstrap_legacy_pipelines()
+    try:
+        await backfill_order_user_ids()
+    except Exception:
+        # Provisioning remains available; unresolved legacy rows are retried
+        # lazily by username during their next Remnawave operation.
+        logger.exception("Remnawave v3 user id startup backfill failed")
     tasks = [polling_loop(), outbox_loop(), inbox_poll_loop()]
     if backend_bot:
         dispatcher = Dispatcher()

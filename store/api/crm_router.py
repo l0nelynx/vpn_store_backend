@@ -13,6 +13,8 @@ crm_router = APIRouter(
 
 
 class ResolveBody(BaseModel):
+    remnawave_user_ids: list[int] = Field(default_factory=list)
+    # Compatibility for callers that have not migrated from Remnawave <=2 yet.
     remnawave_uuids: list[str] = Field(default_factory=list)
     usernames: list[str] = Field(default_factory=list)
     emails: list[str] = Field(default_factory=list)
@@ -26,6 +28,7 @@ class BroadcastBody(ResolveBody):
 @crm_router.post("/resolve")
 async def resolve(body: ResolveBody):
     recipients = await rq.resolve_recipients(
+        remnawave_user_ids=body.remnawave_user_ids or None,
         remnawave_uuids=body.remnawave_uuids or None,
         usernames=body.usernames or None,
         emails=body.emails or None,
@@ -38,6 +41,7 @@ async def broadcast(body: BroadcastBody):
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="text required")
     recipients = await rq.resolve_recipients(
+        remnawave_user_ids=body.remnawave_user_ids or None,
         remnawave_uuids=body.remnawave_uuids or None,
         usernames=body.usernames or None,
         emails=body.emails or None,

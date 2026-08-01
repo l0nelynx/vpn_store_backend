@@ -142,6 +142,7 @@ async def products(marketplace: str | None = Query(None)):
 async def orders(
     email: str | None = None,
     marketplace: str | None = None,
+    remnawave_user_id: int | None = None,
     remnawave_uuid: str | None = None,
     remnawave_username: str | None = None,
     external_order_id: str | None = None,
@@ -154,6 +155,7 @@ async def orders(
     items = await rq.list_orders(
         email=email,
         marketplace=marketplace,
+        remnawave_user_id=remnawave_user_id,
         remnawave_uuid=remnawave_uuid,
         remnawave_username=remnawave_username,
         external_order_id=external_order_id,
@@ -166,6 +168,7 @@ async def orders(
     total = await rq.count_orders(
         email=email,
         marketplace=marketplace,
+        remnawave_user_id=remnawave_user_id,
         remnawave_uuid=remnawave_uuid,
         remnawave_username=remnawave_username,
         external_order_id=external_order_id,
@@ -183,8 +186,16 @@ async def customer_detail(customer_id: int):
 
 
 @admin_router.get("/customers", dependencies=[Depends(verify_admin)])
-async def customers(email: str | None = None, remnawave_uuid: str | None = None):
-    data = await rq.get_customer_360(email=email, remnawave_uuid=remnawave_uuid)
+async def customers(
+    email: str | None = None,
+    remnawave_user_id: int | None = None,
+    remnawave_uuid: str | None = None,
+):
+    data = await rq.get_customer_360(
+        email=email,
+        remnawave_user_id=remnawave_user_id,
+        remnawave_uuid=remnawave_uuid,
+    )
     if not data:
         raise HTTPException(status_code=404, detail="Customer not found")
     return data

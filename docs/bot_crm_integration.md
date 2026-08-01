@@ -40,7 +40,7 @@ Preview how many leftover recipients Store can deliver to.
 
 ```json
 {
-  "remnawave_uuids": ["uuid-1", "uuid-2"],
+  "remnawave_user_ids": [101, 102],
   "usernames": ["gg_id123", "dig_id456"],
   "emails": ["buyer@example.com"]
 }
@@ -57,7 +57,7 @@ Response:
       "marketplace": "ggsel",
       "external_order_id": "123",
       "chat_id": "123",
-      "remnawave_uuid": "...",
+      "remnawave_user_id": 101,
       "remnawave_username": "gg_id123",
       "email": "buyer@example.com",
       "customer_id": 1
@@ -72,7 +72,7 @@ Resolve + send (or dry-run).
 
 ```json
 {
-  "remnawave_uuids": ["..."],
+  "remnawave_user_ids": [101],
   "usernames": [],
   "emails": [],
   "text": "Ваша подписка скоро истечёт. Продлите на GGsel/Digiseller.",
@@ -100,7 +100,7 @@ Customer 360 (orders for that email). Useful for support tooling.
 
 1. After CRM segment evaluation, split recipients:
    - **Y** — local `users` with `tg_id` → existing Telegram `send_message` action
-   - **X−Y** — Remnawave uuids/usernames not in local TG set → Store broadcast
+   - **X−Y** — Remnawave numeric ids/usernames not in local TG set → Store broadcast
 2. Preferred hook: `crm-worker` post-step after TG delivery (same pattern as
    dashboard httpx proxy in `routers/store.py` / Telemt).
 3. Always call `/resolve` in campaign **preview** so operators see Store coverage.
@@ -109,12 +109,12 @@ Customer 360 (orders for that email). Useful for support tooling.
 ### Pseudocode
 
 ```python
-async def deliver_leftover_to_store(uuids: list[str], text: str) -> dict:
+async def deliver_leftover_to_store(user_ids: list[int], text: str) -> dict:
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             f"{store_url}/store/internal/crm/broadcast",
             headers={"Authorization": f"Bearer {store_api_token}"},
-            json={"remnawave_uuids": uuids, "text": text, "dry_run": False},
+            json={"remnawave_user_ids": user_ids, "text": text, "dry_run": False},
         )
         r.raise_for_status()
         return r.json()
@@ -124,9 +124,12 @@ async def deliver_leftover_to_store(uuids: list[str], text: str) -> dict:
 
 Recipients are matched against local `orders` / `customers` by:
 
-1. `orders.remnawave_uuid`
+1. `orders.remnawave_user_id` (Remnawave 3 numeric user id)
 2. `orders.remnawave_username` (`gg_id*`, `dig_id*`)
 3. `customers.email_normalized`
+
+`remnawave_uuids` remains accepted temporarily for historical Remnawave <=2
+records, but new integrations must send `remnawave_user_ids`.
 
 Delivery uses the **newest** order chat per customer (`chat_id` /
 `external_order_id`).

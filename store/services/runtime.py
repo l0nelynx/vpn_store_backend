@@ -301,6 +301,7 @@ async def build_context(order: Order, run: PipelineRun, session) -> dict[str, An
             "content_id": order.content_id,
             "chat_id": order.chat_id,
             "item_id": order.item_id,
+            "remnawave_user_id": order.remnawave_user_id,
             "normalized_status": order.normalized_status,
             "raw_state": order.raw_state,
         },
@@ -358,14 +359,15 @@ async def _provision(step: PipelineStep, context: dict[str, Any], order: Order) 
             external_squad_uuid=parameters.get("external_sq"),
         )
         event = "created"
-    if not data or not data.get("uuid") or not data.get("subscription_url"):
+    if not data or not data.get("id") or not data.get("subscription_url"):
         raise PipelineError("remnawave_failed", "Remnawave did not return a subscription")
     order.remnawave_username = username
-    order.remnawave_uuid = str(data["uuid"])
+    order.remnawave_user_id = int(data["id"])
     order.subscription_url = data["subscription_url"]
     order.days_ordered = days
     return {
-        "uuid": str(data["uuid"]),
+        "id": int(data["id"]),
+        "user_id": int(data["id"]),
         "username": username,
         "subscription_url": data["subscription_url"],
         "days": days,
@@ -386,9 +388,25 @@ async def _execute_step(
     if step.type == "remnawave.provision_subscription":
         return await _provision(step, context, order)
     if step.type == "remnawave.update_user":
-        user_uuid = render_template(str(step.config.get("uuid_template") or "{{ order.remnawave_uuid }}"), context)
+        configured_template = step.config.get("user_id_template") or step.config.get("uuid_template")
+        rendered_user_id = render_template(str(configured_template), context) if configured_template else None
+        user_id = rendered_user_id or order.remnawave_user_id
+        try:
+            user_id = int(user_id) if user_id else None
+        except (TypeError, ValueError):
+            # A published v2 pipeline may still render the removed UUID. Use
+            # its stable username to resolve the numeric v3 id lazily.
+            user_id = None
+        if user_id is None and order.remnawave_username:
+            existing = await rem.get_user_from_username(order.remnawave_username)
+            user_id = existing.get("id") if existing else None
+            if user_id:
+                order.remnawave_user_id = int(user_id)
+        if not user_id:
+            raise PipelineError("remnawave_user_id_missing", "Remnawave numeric user id is missing")
+        order.remnawave_user_id = int(user_id)
         rendered = render_value(step.config.get("fields") or {}, context)
-        result = await rem.update_user(user_uuid, **rendered)
+        result = await rem.update_user(user_id, **rendered)
         if not result:
             raise PipelineError("remnawave_update_failed", "Remnawave update failed")
         return result
@@ -677,8 +695,19 @@ async def ingest_ggsel_purchase(content: dict[str, Any], sale: dict[str, Any] | 
 async def sync_email(order_id: int) -> None:
     async with async_session() as session:
         order = await session.get(Order, order_id)
-        if not order or not order.remnawave_uuid:
+        if not order:
             return
+        user_id = order.remnawave_user_id
+        if not user_id and order.remnawave_username:
+            existing = await rem.get_user_from_username(order.remnawave_username)
+            user_id = existing.get("id") if existing else None
+            if user_id:
+                order.remnawave_user_id = int(user_id)
+        if not user_id:
+            raise PipelineError(
+                "remnawave_user_id_missing",
+                "Could not resolve the Remnawave 3 numeric user id",
+            )
         email = order.buyer_email
         if not email:
             async with aiohttp.ClientSession() as http:
@@ -692,8 +721,12 @@ async def sync_email(order_id: int) -> None:
                     chat = next((row for row in chats if str(row.get("id_i") or row.get("content_id") or row.get("inv")) == str(target)), None)
                     email = (chat or {}).get("email") or (chat or {}).get("buyer_email")
         if not email:
+            # Keep the lazy v2 UUID -> v3 id reconciliation even when the
+            # marketplace has no email to sync yet.
+            if order.remnawave_user_id:
+                await session.commit()
             return
-        result = await rem.update_user_email(order.remnawave_uuid, email)
+        result = await rem.update_user_email(int(user_id), email)
         if not result:
             raise PipelineError("email_sync_failed", "Could not update Remnawave email")
         order.buyer_email = email

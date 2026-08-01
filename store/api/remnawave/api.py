@@ -9,10 +9,11 @@ logger = logging.getLogger(__name__)
 from remnawave.enums import TrafficLimitStrategy, UserStatus
 from remnawave import RemnawaveSDK
 from remnawave.models import (
-    UsersResponseDto,
+    CreateUserBodyDto,
+    ExtendUserBodyDto,
+    GetUsersResponseDto,
     UserResponseDto,
-    CreateUserRequestDto,
-    UpdateUserRequestDto,
+    UpdateUserBodyDto,
 )
 from remnawave.exceptions import NotFoundError
 
@@ -84,7 +85,7 @@ async def close_sdk():
 
 async def get_all_users():
     remnawave = get_sdk()
-    response: UsersResponseDto = await remnawave.users.get_all_users_v2()
+    response: GetUsersResponseDto = await remnawave.users.get_all_users()
     total_users: int = response.total
     users: list[UserResponseDto] = response.users
     logger.info("Total users: %s", total_users)
@@ -102,7 +103,7 @@ async def get_user_from_username(username: str):
         expire_timestamp = int(response.expire_at.timestamp())
 
         return {
-            "uuid": str(response.uuid),
+            "id": response.id,
             "expire": expire_timestamp,
             "subscription_url": response.subscription_url,
             "status": "active" if response.status == UserStatus.ACTIVE else "inactive",
@@ -121,7 +122,7 @@ async def create_user(
     username: str,
     days: int = 30,
     limit_gb: int = 0,
-    descr: str = "created by backend v2",
+    descr: str = "created by Store delivery pipeline",
     email: str = None,
     telegram_id: int = None,
     tag: str = None,
@@ -168,13 +169,13 @@ async def create_user(
         if ext_squad:
             kwargs["external_squad_uuid"] = ext_squad
 
-        new_user = CreateUserRequestDto(**kwargs)
+        new_user = CreateUserBodyDto(**kwargs)
         response: UserResponseDto = await remnawave.users.create_user(new_user)
 
         expire_timestamp = int(response.expire_at.timestamp())
 
         return {
-            "uuid": str(response.uuid),
+            "id": response.id,
             "expire": expire_timestamp,
             "subscription_url": response.subscription_url,
             "status": "active",
@@ -185,40 +186,39 @@ async def create_user(
         return None
 
 
-async def extend_user(user_uuid: str, days: int):
-    """Extend subscription: new expire = max(now, current_expire) + days."""
+async def extend_user(user_id: int, days: int):
+    """Use the Remnawave 3 atomic subscription extension endpoint."""
     try:
         remnawave = get_sdk()
-        uid = str(user_uuid)
-        current: UserResponseDto = await remnawave.users.get_user_by_uuid(uid)
-        if not current:
-            return None
-        now = datetime.datetime.now(datetime.timezone.utc)
-        base = current.expire_at
-        if base.tzinfo is None:
-            base = base.replace(tzinfo=datetime.timezone.utc)
-        if base < now:
-            base = now
-        new_expire = base + datetime.timedelta(days=days)
-        user = UpdateUserRequestDto(
-            uuid=uuid.UUID(uid),
-            expire_at=new_expire,
-            status=UserStatus.ACTIVE,
+        uid = _as_user_id(user_id)
+        response: UserResponseDto = await remnawave.users.extend_user(
+            uid,
+            ExtendUserBodyDto(days=days),
         )
-        response: UserResponseDto = await remnawave.users.update_user(user)
         return {
-            "uuid": str(response.uuid),
+            "id": response.id,
             "expire": int(response.expire_at.timestamp()),
             "subscription_url": response.subscription_url,
             "status": "active" if response.status == UserStatus.ACTIVE else "inactive",
         }
     except Exception as e:
-        _log_rw_error("extend_user", str(user_uuid), e)
+        _log_rw_error("extend_user", str(user_id), e)
         return None
 
 
+def _as_user_id(value) -> int:
+    """Validate Remnawave 3's positive numeric user identifier."""
+    try:
+        user_id = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid Remnawave user id: {value!r}") from exc
+    if user_id <= 0:
+        raise ValueError(f"Invalid Remnawave user id: {value!r}")
+    return user_id
+
+
 async def update_user(
-    user_uuid: str,
+    user_id: int,
     username: str = None,
     days: int = None,
     limit_gb: int = None,
@@ -231,10 +231,10 @@ async def update_user(
     try:
         remnawave = get_sdk()
 
-        update_data = {
-            "uuid": uuid.UUID(user_uuid),
-            "status": UserStatus.ACTIVE if status != "inactive" else UserStatus.INACTIVE,
-        }
+        update_data = {"id": _as_user_id(user_id)}
+
+        if status is not None:
+            update_data["status"] = UserStatus.ACTIVE if status != "inactive" else UserStatus.INACTIVE
 
         if username:
             update_data["username"] = username
@@ -254,7 +254,7 @@ async def update_user(
         if squad:
             update_data["active_internal_squads"] = [squad]
 
-        user = UpdateUserRequestDto(**update_data)
+        user = UpdateUserBodyDto(**update_data)
         response: UserResponseDto = await remnawave.users.update_user(user)
 
         expire_timestamp = int(response.expire_at.timestamp())
@@ -265,44 +265,44 @@ async def update_user(
             "status": "active" if response.status == UserStatus.ACTIVE else "inactive",
         }
     except Exception as e:
-        _log_rw_error("update_user", user_uuid, e)
+        _log_rw_error("update_user", str(user_id), e)
         return None
 
 
-async def update_user_email(user_uuid: str, email: str):
-    """Update only the marketplace email; never reactivate or change limits/expiry."""
+async def update_user_email(user_id: int, email: str):
+    """Update only marketplace email using the Remnawave 3 numeric id."""
     try:
         remnawave = get_sdk()
         safe = _safe_email(email, "user")
         if not safe:
             return None
-        request = UpdateUserRequestDto(uuid=uuid.UUID(str(user_uuid)), email=safe)
+        request = UpdateUserBodyDto(id=_as_user_id(user_id), email=safe)
         response: UserResponseDto = await remnawave.users.update_user(request)
         return {
-            "uuid": str(response.uuid),
+            "id": response.id,
             "email": response.email,
             "subscription_url": response.subscription_url,
         }
     except Exception as e:
-        _log_rw_error("update_user_email", str(user_uuid), e)
+        _log_rw_error("update_user_email", str(user_id), e)
         return None
 
 
-async def delete_user(user_uuid: str) -> bool:
+async def delete_user(user_id: int) -> bool:
     try:
         remnawave = get_sdk()
-        await remnawave.users.delete_user(user_uuid)
+        await remnawave.users.delete_user(_as_user_id(user_id))
         return True
     except Exception as e:
-        _log_rw_error("delete_user", user_uuid, e)
+        _log_rw_error("delete_user", str(user_id), e)
         return False
 
 
-async def get_user_subscription_link(user_uuid: str) -> str:
+async def get_user_subscription_link(user_id: int) -> str:
     try:
         remnawave = get_sdk()
-        response: UserResponseDto = await remnawave.users.get_user_by_uuid(user_uuid)
+        response: UserResponseDto = await remnawave.users.get_user_by_id(_as_user_id(user_id))
         return response.subscription_url if response else None
     except Exception as e:
-        _log_rw_error("get_subscription_link", user_uuid, e)
+        _log_rw_error("get_subscription_link", str(user_id), e)
         return None

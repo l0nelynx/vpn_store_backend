@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
+import datetime
 from types import SimpleNamespace
 
+import pytest
+
 from store.api.remnawave import api as remnawave_api
+from store.api.remnawave.users_bulk import _normalize_user
 from store.services.integrations import _blocked, decrypt_secret, encrypt_secret
 
 
@@ -21,21 +24,55 @@ def test_integration_secret_roundtrip(monkeypatch) -> None:
     assert decrypt_secret(ciphertext, nonce) == "sensitive-value"
 
 
-def test_email_finalizer_updates_only_uuid_and_email(monkeypatch) -> None:
+def test_email_finalizer_updates_only_numeric_id_and_email(monkeypatch) -> None:
     captured = {}
 
     class Users:
         async def update_user(self, request):
             captured.update(request.model_dump(exclude_none=True))
             return SimpleNamespace(
-                uuid=request.uuid,
+                id=request.id,
                 email=request.email,
                 subscription_url="https://subscription.example/test",
             )
 
     monkeypatch.setattr(remnawave_api, "get_sdk", lambda: SimpleNamespace(users=Users()))
-    user_uuid = uuid.uuid4()
-    result = asyncio.run(remnawave_api.update_user_email(str(user_uuid), "buyer@example.com"))
-    assert set(captured) == {"uuid", "email"}
-    assert captured["uuid"] == user_uuid
+    result = asyncio.run(remnawave_api.update_user_email(123, "buyer@example.com"))
+    assert set(captured) == {"id", "email"}
+    assert captured["id"] == 123
     assert result["email"] == "buyer@example.com"
+
+
+def test_extend_user_uses_v3_atomic_endpoint(monkeypatch) -> None:
+    captured = {}
+
+    class Users:
+        async def extend_user(self, user_id, request):
+            captured["user_id"] = user_id
+            captured.update(request.model_dump())
+            return SimpleNamespace(
+                id=user_id,
+                expire_at=datetime.datetime.now(datetime.timezone.utc),
+                subscription_url="https://subscription.example/test",
+                status=remnawave_api.UserStatus.ACTIVE,
+            )
+
+    monkeypatch.setattr(remnawave_api, "get_sdk", lambda: SimpleNamespace(users=Users()))
+    result = asyncio.run(remnawave_api.extend_user(321, 30))
+
+    assert captured == {"user_id": 321, "days": 30}
+    assert result["id"] == 321
+
+
+def test_v3_user_ids_are_numeric_and_bulk_normalization_drops_uuid() -> None:
+    with pytest.raises(ValueError):
+        remnawave_api._as_user_id("7d743bf8-e2f2-4a98-8d79-6de45b5cd443")
+
+    normalized = _normalize_user({
+        "id": 456,
+        "username": "gg_id123",
+        "subscriptionUrl": "https://subscription.example/test",
+        "status": "ACTIVE",
+    })
+    assert normalized["id"] == 456
+    assert "uuid" not in normalized

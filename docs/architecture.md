@@ -13,5 +13,6 @@ See the implementation plan. Summary:
 
 - Idempotent on `(marketplace, provider_order_id)` and per-step idempotency keys
 - If order already provisioned: return existing URL (resend delivery if needed), **no double-extend**
-- If Remnawave username exists without a local delivered order: **extend** `expire_at` by `days` from `max(now, current_expire)`
+- Remnawave 3 users are stored by numeric `id`; the removed legacy UUID remains read-only historical data.
+- Existing users are resolved by stable username and extended through `POST /api/users/{userId}/actions/extend`.
 - New orders keep usernames `gg_id{content_id}` / `dig_id{inv}`

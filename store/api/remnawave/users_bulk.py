@@ -5,22 +5,31 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
+
 from store.api.remnawave.api import get_sdk, _log_rw_error
+from store.database.models import Order, async_session
 
 logger = logging.getLogger(__name__)
 
 
-def _normalize_user(raw: dict[str, Any]) -> dict[str, Any]:
+def _normalize_user(raw: Any) -> dict[str, Any]:
+    if hasattr(raw, "model_dump"):
+        raw = raw.model_dump(by_alias=True)
+    if not isinstance(raw, dict):
+        raw = {}
     username = raw.get("username")
-    uuid = raw.get("uuid")
+    user_id = raw.get("id")
     sub = raw.get("subscriptionUrl") or raw.get("subscription_url")
     expire = raw.get("expireAt") or raw.get("expire_at")
+    status = raw.get("status")
+    status_value = getattr(status, "value", status)
     return {
-        "uuid": str(uuid) if uuid is not None else None,
+        "id": int(user_id) if user_id is not None else None,
         "username": username,
         "subscription_url": sub,
         "expire": expire,
-        "status": "active",
+        "status": str(status_value or "active").lower(),
     }
 
 
@@ -30,34 +39,22 @@ async def stream_all_users(page_size: int = 250) -> list[dict[str, Any]]:
     Falls back to GET /api/users?start=&size= if stream is unavailable.
     """
     sdk = get_sdk()
-    client = sdk._client
     page_size = max(1, min(int(page_size), 1000))
     users: list[dict] = []
 
     # Prefer cursor stream
     try:
-        cursor: str | None = None
+        cursor: int | None = None
         while True:
-            params: dict[str, Any] = {"size": page_size}
-            if cursor:
-                params["cursor"] = cursor
-            resp = await client.get("/users/stream", params=params, timeout=60.0)
-            if resp.status_code == 404:
-                raise RuntimeError("stream endpoint not available")
-            resp.raise_for_status()
-            data = resp.json()
-            payload = data.get("response") if isinstance(data, dict) else None
-            if payload is None and isinstance(data, dict):
-                payload = data
-            batch = (payload or {}).get("users") or []
+            response = await sdk.users.get_users_stream(size=page_size, cursor=cursor)
+            batch = response.users or []
             for u in batch:
-                if isinstance(u, dict):
-                    users.append(_normalize_user(u))
-            next_cursor = (payload or {}).get("nextCursor")
-            has_more = bool((payload or {}).get("hasMore"))
+                users.append(_normalize_user(u))
+            next_cursor = response.next_cursor
+            has_more = response.has_more
             if not has_more or not next_cursor:
                 break
-            cursor = str(next_cursor)
+            cursor = int(next_cursor)
         logger.info("Remnawave stream loaded %s users", len(users))
         return users
     except Exception as e:
@@ -75,16 +72,7 @@ async def stream_all_users(page_size: int = 250) -> list[dict[str, Any]]:
         if not batch:
             break
         for u in batch:
-            raw = u.model_dump(by_alias=True) if hasattr(u, "model_dump") else dict(u)
-            users.append(_normalize_user(raw if isinstance(raw, dict) else {}))
-            if not users[-1].get("username") and hasattr(u, "username"):
-                users[-1] = {
-                    "uuid": str(getattr(u, "uuid", "")),
-                    "username": getattr(u, "username", None),
-                    "subscription_url": getattr(u, "subscription_url", None),
-                    "expire": getattr(u, "expire_at", None),
-                    "status": "active",
-                }
+            users.append(_normalize_user(u))
         if len(batch) < page_size:
             break
         start += page_size
@@ -108,26 +96,15 @@ async def build_username_index(
             index[name] = None
 
     sdk = get_sdk()
-    client = sdk._client
     page_size = max(1, min(int(page_size), 1000))
     remaining = set(needed) if needed is not None else None
 
     try:
-        cursor: str | None = None
+        cursor: int | None = None
         while True:
-            params: dict[str, Any] = {"size": page_size}
-            if cursor:
-                params["cursor"] = cursor
-            resp = await client.get("/users/stream", params=params, timeout=60.0)
-            if resp.status_code == 404:
-                raise RuntimeError("stream endpoint not available")
-            resp.raise_for_status()
-            data = resp.json()
-            payload = data.get("response") if isinstance(data, dict) else data
-            batch = (payload or {}).get("users") or []
+            response = await sdk.users.get_users_stream(size=page_size, cursor=cursor)
+            batch = response.users or []
             for u in batch:
-                if not isinstance(u, dict):
-                    continue
                 norm = _normalize_user(u)
                 uname = norm.get("username")
                 if not uname:
@@ -137,13 +114,13 @@ async def build_username_index(
                 elif uname in remaining:
                     index[uname] = norm
                     remaining.discard(uname)
-            next_cursor = (payload or {}).get("nextCursor")
-            has_more = bool((payload or {}).get("hasMore"))
+            next_cursor = response.next_cursor
+            has_more = response.has_more
             if remaining is not None and not remaining:
                 break
             if not has_more or not next_cursor:
                 break
-            cursor = str(next_cursor)
+            cursor = int(next_cursor)
         logger.info(
             "Remnawave username index via stream: matched=%s needed=%s",
             sum(1 for v in index.values() if v),
@@ -168,13 +145,7 @@ async def build_username_index(
             uname = getattr(u, "username", None)
             if not uname:
                 continue
-            norm = {
-                "uuid": str(getattr(u, "uuid", "")),
-                "username": uname,
-                "subscription_url": getattr(u, "subscription_url", None),
-                "expire": getattr(u, "expire_at", None),
-                "status": "active",
-            }
+            norm = _normalize_user(u)
             if remaining is None:
                 index[uname] = norm
             elif uname in remaining:
@@ -186,3 +157,39 @@ async def build_username_index(
             break
         start += page_size
     return index
+
+
+async def backfill_order_user_ids() -> dict[str, int]:
+    """Resolve legacy Store orders to Remnawave 3 numeric ids by username."""
+    async with async_session() as session:
+        usernames = set(await session.scalars(
+            select(Order.remnawave_username).where(
+                Order.remnawave_user_id.is_(None),
+                Order.remnawave_username.is_not(None),
+            ).distinct()
+        ))
+    usernames.discard(None)
+    if not usernames:
+        return {"candidates": 0, "updated": 0, "unresolved": 0}
+
+    index = await build_username_index(set(usernames))
+    updated = 0
+    async with async_session() as session:
+        orders = list((await session.scalars(select(Order).where(
+            Order.remnawave_user_id.is_(None),
+            Order.remnawave_username.in_(usernames),
+        ))).all())
+        for order in orders:
+            user = index.get(order.remnawave_username)
+            if user and user.get("id") is not None:
+                order.remnawave_user_id = int(user["id"])
+                updated += 1
+        await session.commit()
+    unresolved = sum(1 for name in usernames if not index.get(name))
+    logger.info(
+        "Remnawave v3 id backfill: candidates=%s updated=%s unresolved=%s",
+        len(usernames),
+        updated,
+        unresolved,
+    )
+    return {"candidates": len(usernames), "updated": updated, "unresolved": unresolved}

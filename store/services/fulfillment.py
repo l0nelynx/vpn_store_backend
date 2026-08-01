@@ -122,6 +122,8 @@ async def fulfill_order(
     return {
         "sub": current.subscription_url if current else None,
         "order_id": current.id if current else order.id,
+        "remnawave_user_id": current.remnawave_user_id if current else None,
+        # Legacy compatibility only; Remnawave 3 no longer returns a user UUID.
         "remnawave_uuid": current.remnawave_uuid if current else None,
         "event": "create" if created else "existing",
         "created": created,

@@ -46,7 +46,7 @@ async def get_user_info(username):
                 "expire": expire,
                 "subscription_url": user_info.get("subscription_url"),
                 "data_limit": None,
-                "uuid": user_info.get("uuid"),
+                "id": user_info.get("id"),
             }
         return 404
     except Exception as e:

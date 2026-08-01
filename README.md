@@ -17,6 +17,12 @@ Pipelines, Remnawave provisioning, generic HTTP actions and Store Admin.
 3. `docker compose up -d` runs migrations, API and worker as separate processes.
 4. Admin SPA: `cd admin && pnpm install && pnpm run build` → served at `/store/admin/`
 
+Remnawave Panel 3 is supported through `remnawave-api` 3.x. Panel users are
+identified by their numeric `id`; the old UUID columns are retained only for
+historical compatibility. Existing Store orders are linked to the new id
+at worker startup (and lazily on later operations) through their stable
+Remnawave username.
+
 Legacy products with an explicit `order_params.marketplace` are backfilled into
 active bindings and receive the published compatibility pipeline automatically.
 Rows without a marketplace remain `needs_configuration` and must be assigned in
@@ -24,8 +30,8 @@ Store Admin because their provider cannot be inferred safely.
 
 During rollout Compose also runs the idempotent `store-legacy-import` job after
 Alembic. If `db/backend_db.sqlite3` exists, it is mounted read-only and its
-`order_params`, `param_value_mappings` and `product_option_labels` are copied to
-PostgreSQL before the API and worker start. Repeated runs do not duplicate data.
+configuration and delivered-order history are copied to PostgreSQL before the
+API and worker start. Repeated runs do not duplicate data.
 
 ## Docs
 

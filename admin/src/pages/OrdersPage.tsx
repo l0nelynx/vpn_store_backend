@@ -10,6 +10,8 @@ type Order = {
   email: string | null;
   customer_id: number | null;
   remnawave_username: string | null;
+  remnawave_user_id: number | null;
+  // Historical Remnawave <=2 value.
   remnawave_uuid: string | null;
   days_ordered: number | null;
   status: string;
@@ -161,7 +163,10 @@ export default function OrdersPage() {
                       <td><span className="tag">{o.marketplace}</span></td>
                       <td>{o.external_order_id}</td>
                       <td>{o.email || "—"}</td>
-                      <td className="break-all">{o.remnawave_username}</td>
+                      <td className="break-all">
+                        {o.remnawave_username}
+                        {o.remnawave_user_id != null && <span className="muted"> · #{o.remnawave_user_id}</span>}
+                      </td>
                       <td>{o.days_ordered}</td>
                       <td>{o.status} / d{o.delivery_status}</td>
                       <td>
@@ -196,6 +201,7 @@ export default function OrdersPage() {
                   details={
                     <>
                       <DetailRow label="RW user">{o.remnawave_username || "—"}</DetailRow>
+                      <DetailRow label="RW ID">{o.remnawave_user_id ?? "—"}</DetailRow>
                       <DetailRow label="Days">{o.days_ordered ?? "—"}</DetailRow>
                       <DetailRow label="Created">{o.created_at || "—"}</DetailRow>
                     </>

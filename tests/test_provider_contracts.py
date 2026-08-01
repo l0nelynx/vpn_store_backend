@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import asyncio
+import json
 
 from store.integrations.providers import DigisellerAdapter, GGSelAdapter
 from store.services.order_sync import _ggsel_order_content
@@ -20,6 +21,9 @@ class _Response:
 
     async def json(self, **_kwargs):
         return self.payload
+
+    async def read(self):
+        return json.dumps(self.payload).encode()
 
 
 class _RequestHttp:
