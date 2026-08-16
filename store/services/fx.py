@@ -19,6 +19,9 @@ from store.domain.money import (
     parse_jsdelivr_usd_json,
     parse_open_er_api_json,
     quote_order_revenue_rub,
+    EUR_CODES,
+    USD_CODES,
+    WMZ_CODES,
 )
 from store.integrations.providers import canonical_currency
 
@@ -45,8 +48,6 @@ FX_SOURCES = (
 )
 _HEADERS = {"Accept": "application/json", "User-Agent": "vpn-store-backend/2.0"}
 RUB_CODES = {"RUB", "RUR", "WMR"}
-USD_CODES = {"USD", "WMZ"}
-EUR_CODES = {"EUR", "WME"}
 _refresh_lock = asyncio.Lock()
 
 
@@ -152,19 +153,37 @@ async def loaded_quote_rates(session) -> tuple[Decimal | None, Decimal | None]:
     return (usd.rate if usd else None, eur.rate if eur else None)
 
 
-def recovered_order_currency(order: Order) -> str | None:
-    curr = canonical_currency(order.net_currency or order.currency)
-    if curr in USD_CODES | EUR_CODES:
-        return curr
-    raw = order.raw if isinstance(getattr(order, "raw", None), dict) else {}
-    content = raw.get("content") if isinstance(raw.get("content"), dict) else {}
-    for source in (raw, content):
+def _raw_money_currency(raw: Any) -> str | None:
+    payload = raw if isinstance(raw, dict) else {}
+    content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
+    for source in (payload, content):
         recovered = canonical_currency(
-            source.get("type_curr") or source.get("currency") or source.get("currency_type")
+            source.get("currency_type")
+            or source.get("type_curr")
+            or source.get("amount_currency")
+            or source.get("currency")
         )
-        if recovered in USD_CODES | EUR_CODES:
+        if recovered:
             return recovered
-    return curr
+    return None
+
+
+def recovered_order_currency(order: Order) -> str | None:
+    payload_curr = _raw_money_currency(getattr(order, "raw", None))
+    if payload_curr in USD_CODES:
+        return "USD"
+    if payload_curr in WMZ_CODES:
+        return "WMZ"
+    if payload_curr in EUR_CODES:
+        return "EUR"
+    if payload_curr in RUB_CODES:
+        return "RUB"
+    if payload_curr:
+        return payload_curr
+    stored = canonical_currency(order.net_currency or order.currency)
+    if stored in USD_CODES | EUR_CODES | WMZ_CODES:
+        return stored
+    return stored
 
 
 def order_revenue_rub(order: Order, usd_rate: Decimal | None, eur_rate: Decimal | None) -> Decimal:
@@ -209,8 +228,15 @@ async def convert_to_rub(
 ) -> tuple[Decimal | None, FxRate | None, str | None]:
     amount = as_decimal(value)
     usd = as_decimal(amount_usd)
+    if usd is not None and usd <= 0:
+        usd = None
     curr = canonical_currency(currency)
-    if (not curr or curr in RUB_CODES) and looks_unconverted_usd(amount if amount is not None else usd, usd):
+    if curr in WMZ_CODES:
+        if usd is None:
+            return None, None, "WMZ"
+        curr = "USD"
+        amount = usd
+    elif (not curr or curr in RUB_CODES) and looks_unconverted_usd(amount if amount is not None else usd, usd):
         curr = "USD"
         amount = usd if usd is not None else amount
     if amount is None:
@@ -236,7 +262,7 @@ async def backfill_order_rub_amounts() -> dict[str, int]:
                 select(Order).where(
                     or_(
                         Order.marketplace == "digiseller",
-                        func.upper(func.coalesce(Order.currency, "")).in_(tuple(USD_CODES | EUR_CODES)),
+                        func.upper(func.coalesce(Order.currency, "")).in_(tuple(USD_CODES | EUR_CODES | WMZ_CODES)),
                         and_(Order.amount_usd.is_not(None), Order.amount_usd > 0),
                         Order.net_rub.is_(None),
                         Order.net_rub == 0,

@@ -105,14 +105,25 @@ def test_digiseller_money_fields_fallback_to_amount_and_nested_content() -> None
     assert webhook["currency"] == "RUB"
 
     nested = adapter.money_fields({
-        "content": {"amount": 80, "profit": "", "currency": "WMZ"},
+        "content": {"amount": 80, "profit": "", "currency_type": "WMZ", "amount_usd": "56"},
     })
     assert nested["gross_amount"] == 80
     assert nested["net_amount"] == 80
-    assert nested["currency"] == "USD"
+    assert nested["currency"] == "WMZ"
+    assert nested["amount_usd"] == "56"
+
+    wmt = adapter.money_fields({"amount": "5", "currency_type": "WMT", "amount_usd": "5"})
+    assert wmt["currency"] == "USD"
+    assert wmt["amount_usd"] == "5"
 
     inferred = adapter.money_fields({"amount": "3.50", "amount_usd": "3.50"})
-    assert inferred["currency"] == "USD"
+    assert inferred["currency"] is None
+    assert inferred["amount_usd"] == "3.50"
+
+    unlabeled = adapter.money_fields({"amount": "5", "amount_usd": 0, "type_curr": ""})
+    assert unlabeled["currency"] is None
+    assert unlabeled["amount_usd"] is None
+    assert unlabeled["net_amount"] == "5"
 
     partner = adapter.money_fields({"amount": "100", "agent_percent": 10, "type_curr": "RUB"})
     assert partner["net_amount"] == Decimal("90")
@@ -188,13 +199,19 @@ def test_fx_json_and_unconverted_usd_detection() -> None:
 
     rate = Decimal("83.9851108")
     assert quote_order_revenue_rub(
-        net_rub="5", amount="5", amount_usd="3.50", currency="RUB", usd_rate=rate
+        net_rub="5", amount="5", amount_usd="3.50", currency="WMZ", usd_rate=rate
     ) == Decimal("3.50") * rate
     assert quote_order_revenue_rub(
         net_rub="0", amount="3.50", currency="USD", usd_rate=rate
     ) == Decimal("3.50") * rate
     assert quote_order_revenue_rub(
-        net_rub=None, amount="3.50", currency="WMZ", usd_rate=rate
+        net_rub=None, amount="5", currency="WMT", usd_rate=rate
+    ) == Decimal("5") * rate
+    assert quote_order_revenue_rub(
+        net_rub=None, amount="5", currency="WMZ", usd_rate=rate
+    ) == Decimal("0")
+    assert quote_order_revenue_rub(
+        net_rub="5", amount="5", amount_usd="3.50", currency="RUB", usd_rate=rate
     ) == Decimal("3.50") * rate
     assert quote_order_revenue_rub(
         net_rub="293.99", amount_usd="3.50", currency="RUB", usd_rate=rate
@@ -204,19 +221,36 @@ def test_fx_json_and_unconverted_usd_detection() -> None:
     ) == Decimal("142.50")
     assert order_revenue_rub(
         SimpleNamespace(
-            net_rub=Decimal("0"),
+            marketplace="digiseller",
+            net_rub=Decimal("5"),
             profit_amount=None,
-            net_amount=Decimal("3.50"),
-            gross_amount=Decimal("3.50"),
-            amount=Decimal("3.50"),
-            amount_usd=None,
-            currency="RUB",
-            net_currency="RUB",
-            raw={"amount": "3.50", "type_curr": "WMZ"},
+            net_amount=Decimal("5"),
+            gross_amount=Decimal("5"),
+            amount=Decimal("5"),
+            amount_usd=Decimal("3.50"),
+            currency="WMZ",
+            net_currency="WMZ",
+            raw={"amount": "5", "currency_type": "WMZ", "amount_usd": 3.5},
         ),
         rate,
         None,
     ) == Decimal("3.50") * rate
+    assert order_revenue_rub(
+        SimpleNamespace(
+            marketplace="digiseller",
+            net_rub=Decimal("0"),
+            profit_amount=None,
+            net_amount=Decimal("5"),
+            gross_amount=Decimal("5"),
+            amount=Decimal("5"),
+            amount_usd=Decimal("5"),
+            currency="USD",
+            net_currency="USD",
+            raw={"amount": "5", "currency_type": "WMT", "amount_usd": 5},
+        ),
+        rate,
+        None,
+    ) == Decimal("5") * rate
 
     open_er = {
         "time_last_update_utc": "Sun, 16 Aug 2026 00:02:31 +0000",

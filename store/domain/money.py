@@ -17,8 +17,9 @@ def as_decimal(value: Any) -> Decimal | None:
 
 
 RUB_CODES = {"RUB", "RUR", "WMR", ""}
-USD_CODES = {"USD", "WMZ"}
+USD_CODES = {"USD", "WMT", "USDT"}
 EUR_CODES = {"EUR", "WME"}
+WMZ_CODES = {"WMZ"}
 
 
 def canonical_money_currency(raw: Any) -> str:
@@ -29,10 +30,16 @@ def canonical_money_currency(raw: Any) -> str:
         "WMR": "RUB",
         "RUR": "RUB",
         "RUB": "RUB",
-        "WMZ": "USD",
+        "R": "RUB",
+        "WMT": "USD",
+        "USDT": "USD",
         "USD": "USD",
+        "T": "USD",
+        "WMZ": "WMZ",
+        "Z": "WMZ",
         "WME": "EUR",
         "EUR": "EUR",
+        "E": "EUR",
     }.get(code, code)
 
 
@@ -53,6 +60,8 @@ def quote_order_revenue_rub(
     stored = as_decimal(net_rub)
     native = as_decimal(profit_amount) or as_decimal(net_amount) or as_decimal(gross_amount) or as_decimal(amount)
     usd = as_decimal(amount_usd)
+    if usd is not None and usd <= 0:
+        usd = None
     curr = canonical_money_currency(net_currency or currency)
     usd_rate = usd_rate if usd_rate and usd_rate > 0 else None
     eur_rate = eur_rate if eur_rate and eur_rate > 0 else None
@@ -65,6 +74,8 @@ def quote_order_revenue_rub(
     if curr in USD_CODES:
         source = native if native is not None else usd if usd is not None else stored
         return as_usd_rub(source) or Decimal("0")
+    if curr in WMZ_CODES:
+        return as_usd_rub(usd) or Decimal("0")
     if curr in EUR_CODES:
         source = native if native is not None else stored
         if source is not None and eur_rate:

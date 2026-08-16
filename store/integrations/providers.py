@@ -15,6 +15,7 @@ from typing import Any
 
 import aiohttp
 
+from store.domain.money import as_decimal
 from store.settings import secrets
 
 # Digiseller type_curr uses WebMoney ticker codes, not ISO-4217.
@@ -22,10 +23,16 @@ CURRENCY_ALIASES = {
     "WMR": "RUB",
     "RUR": "RUB",
     "RUB": "RUB",
-    "WMZ": "USD",
+    "R": "RUB",
+    "WMT": "USD",
+    "USDT": "USD",
     "USD": "USD",
+    "T": "USD",
+    "WMZ": "WMZ",
+    "Z": "WMZ",
     "WME": "EUR",
     "EUR": "EUR",
+    "E": "EUR",
 }
 
 
@@ -207,9 +214,12 @@ class DigisellerAdapter:
                         return value
             return None
 
-        amount = pick("amount")
+        amount = pick("amount", "amount_out", "amount_in")
         profit = pick("profit")
-        amount_usd = pick("amount_usd")
+        amount_usd = pick("amount_usd", "amount_in_usd")
+        usd_value = as_decimal(amount_usd)
+        if usd_value is None or usd_value <= 0:
+            amount_usd = None
         net: Any = profit
         if net is None and amount is not None:
             net = amount
@@ -221,14 +231,8 @@ class DigisellerAdapter:
                         net = Decimal(str(amount)) * (Decimal("100") - percent) / Decimal("100")
                 except (InvalidOperation, ValueError):
                     pass
-        currency = self.normalize_currency(pick("type_curr", "currency", "currency_type"))
-        if currency is None:
-            try:
-                amt = Decimal(str(amount)) if amount not in (None, "") else None
-                usd = Decimal(str(amount_usd)) if amount_usd not in (None, "") else None
-            except (InvalidOperation, ValueError):
-                amt = usd = None
-            currency = "USD" if amt is not None and usd is not None and abs(amt - usd) <= Decimal("0.05") else "RUB"
+        # Purchase/info: currency_type (WMT|WMZ|WME|WMU). Webhook: type_curr. Sales: amount_currency.
+        currency = self.normalize_currency(pick("currency_type", "type_curr", "amount_currency", "currency"))
         return {
             "gross_amount": amount,
             "net_amount": net,
