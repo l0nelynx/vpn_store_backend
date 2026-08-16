@@ -11,6 +11,7 @@ from aiogram import Dispatcher
 
 from store.api.remnawave.users_bulk import backfill_order_user_ids
 from store.database.models import async_main
+from store.services.fx import backfill_order_rub_amounts, refresh_cbr_rates
 from store.services.messaging import poll_unread_chats
 from store.services.order_sync import sync_ggsel_orders
 from store.services.pipelines import bootstrap_legacy_pipelines
@@ -54,6 +55,17 @@ async def outbox_loop() -> None:
         await asyncio.gather(*(process_outbox_job(job_id) for job_id in ids))
 
 
+async def fx_loop() -> None:
+    while True:
+        try:
+            await refresh_cbr_rates()
+            summary = await backfill_order_rub_amounts()
+            logger.info("FX maintenance: %s", summary)
+        except Exception:
+            logger.exception("FX maintenance failed")
+        await asyncio.sleep(6 * 3600)
+
+
 async def main() -> None:
     await async_main()
     await bootstrap_templates()
@@ -64,7 +76,7 @@ async def main() -> None:
         # Provisioning remains available; unresolved legacy rows are retried
         # lazily by username during their next Remnawave operation.
         logger.exception("Remnawave v3 user id startup backfill failed")
-    tasks = [polling_loop(), outbox_loop(), inbox_poll_loop()]
+    tasks = [polling_loop(), outbox_loop(), inbox_poll_loop(), fx_loop()]
     if backend_bot:
         dispatcher = Dispatcher()
         dispatcher.include_router(telegram_router)

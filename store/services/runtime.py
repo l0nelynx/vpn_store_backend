@@ -21,7 +21,6 @@ from store.database.models import (
     Customer,
     DeadLetterJob,
     DeliveryPipeline,
-    FxRate,
     MessageTemplate,
     Order,
     OrderEvent,
@@ -37,6 +36,7 @@ from store.database.models import (
 )
 from store.domain.pipeline import PipelineError, evaluate_condition, get_path, render_template, render_value
 from store.integrations.providers import canonical_currency, digiseller, ggsel
+from store.services.fx import convert_to_rub
 from store.services.integrations import execute_http_action
 
 logger = logging.getLogger(__name__)
@@ -84,22 +84,25 @@ async def _quote_order_money(
     gross_curr = canonical_currency(gross_currency or currency)
     net_curr = canonical_currency(net_currency or currency)
     currency_canon = canonical_currency(currency) or gross_curr or net_curr
-    fx_rate = await session.get(FxRate, existing_fx_rate_id) if existing_fx_rate_id else None
-    currencies = {value for value in (gross_curr, net_curr) if value and value not in {"RUB"}}
-    if currencies and fx_rate is None:
-        # A single order normally has one source currency. Rates are append-only;
-        # the selected row is pinned on the order for stable historical totals.
-        fx_rate = await session.scalar(
-            select(FxRate).where(FxRate.base_currency.in_(currencies), FxRate.quote_currency == "RUB")
-            .order_by(FxRate.rate_date.desc()).limit(1)
-        )
-
-    def rub(value: Decimal | None, curr: str | None) -> Decimal | None:
-        if value is None or not curr:
-            return None
-        if curr == "RUB":
-            return value
-        return value * fx_rate.rate if fx_rate and fx_rate.base_currency.upper() == curr else None
+    net_rub, fx_rate, net_curr_out = await convert_to_rub(
+        session,
+        net_value,
+        net_curr or currency_canon,
+        amount_usd=amount_usd,
+        existing_fx_rate_id=existing_fx_rate_id,
+    )
+    gross_rub, fx_gross, gross_curr_out = await convert_to_rub(
+        session,
+        gross_value,
+        gross_curr or currency_canon,
+        amount_usd=amount_usd,
+        existing_fx_rate_id=existing_fx_rate_id,
+    )
+    currency_canon = net_curr_out or gross_curr_out or currency_canon
+    gross_curr = gross_curr_out or gross_curr or currency_canon
+    net_curr = net_curr_out or net_curr or currency_canon
+    if fx_rate is None:
+        fx_rate = fx_gross
 
     return {
         "gross_amount": gross_value,
@@ -110,8 +113,8 @@ async def _quote_order_money(
         "currency": currency_canon,
         "gross_currency": gross_curr,
         "net_currency": net_curr,
-        "gross_rub": rub(gross_value, gross_curr),
-        "net_rub": rub(net_value, net_curr),
+        "gross_rub": gross_rub,
+        "net_rub": net_rub,
         "fx_rate_id": fx_rate.id if fx_rate else None,
     }
 

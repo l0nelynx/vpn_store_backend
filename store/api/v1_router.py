@@ -33,6 +33,7 @@ from store.integrations.providers import digiseller, ggsel
 from store.domain.pipeline import PipelineDefinition, evaluate_condition, mask_secrets, render_template, render_value, validate_pipeline
 from store.services import pipelines
 from store.services.catalog_sync import sync_all_catalogs
+from store.services.fx import ensure_cbr_rates, gross_rub_expr, revenue_rub_expr
 from store.services.integrations import execute_http_action, save_profile_secret
 from store.services.order_sync import sync_all_orders
 from store.services.runtime import enqueue
@@ -413,14 +414,12 @@ async def order_events(order_id: int):
 
 @router.get("/analytics/overview")
 async def analytics_overview():
+    await ensure_cbr_rates()
     async with async_session() as session:
         order_count = await session.scalar(select(func.count(Order.id))) or 0
         delivered = await session.scalar(select(func.count(Order.id)).where(Order.delivery_status == 1)) or 0
-        # Digiseller webhooks historically stored amount but left *_rub null (WMR / missing profit).
-        gross_expr = func.coalesce(Order.gross_rub, Order.gross_amount, Order.amount)
-        net_expr = func.coalesce(Order.net_rub, Order.profit_amount, Order.net_amount, Order.gross_rub, Order.amount)
-        gross = await session.scalar(select(func.coalesce(func.sum(gross_expr), 0))) or 0
-        net = await session.scalar(select(func.coalesce(func.sum(net_expr), 0))) or 0
+        gross = await session.scalar(select(func.coalesce(func.sum(gross_rub_expr()), 0))) or 0
+        net = await session.scalar(select(func.coalesce(func.sum(revenue_rub_expr()), 0))) or 0
         needs_review = await session.scalar(select(func.count(PipelineRun.id)).where(PipelineRun.status == "needs_review")) or 0
         dead_letters = await session.scalar(select(func.count(DeadLetterJob.id))) or 0
         providers = (
@@ -516,13 +515,15 @@ async def analytics_series(
     lookback, unit, _ = _SERIES_RANGES[range]
     now = datetime.now(timezone.utc)
     since = now - lookback
+    try:
+        await ensure_cbr_rates()
+    except Exception:
+        pass
     bucket_expr = func.date_trunc(unit, Order.created_at)
     value_expr = (
         func.count(Order.id)
         if metric == "orders"
-        else func.coalesce(func.sum(func.coalesce(
-            Order.net_rub, Order.profit_amount, Order.net_amount, Order.gross_rub, Order.amount,
-        )), 0)
+        else func.coalesce(func.sum(revenue_rub_expr()), 0)
     )
     async with async_session() as session:
         rows = (

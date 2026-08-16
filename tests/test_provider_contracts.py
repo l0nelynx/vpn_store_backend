@@ -111,6 +111,9 @@ def test_digiseller_money_fields_fallback_to_amount_and_nested_content() -> None
     assert nested["net_amount"] == 80
     assert nested["currency"] == "USD"
 
+    inferred = adapter.money_fields({"amount": "3.50", "amount_usd": "3.50"})
+    assert inferred["currency"] == "USD"
+
     partner = adapter.money_fields({"amount": "100", "agent_percent": 10, "type_curr": "RUB"})
     assert partner["net_amount"] == Decimal("90")
     assert partner["profit_amount"] is None
@@ -143,7 +146,47 @@ def test_quote_order_money_maps_wmr_profit_to_net_rub() -> None:
         assert fallback["net_rub"] == Decimal("80")
         assert fallback["profit_amount"] is None
 
+        class _Fx:
+            id = 7
+            rate = Decimal("83.9971")
+            base_currency = "USD"
+
+        class _FxSession:
+            async def get(self, *_args, **_kwargs):
+                return None
+
+            async def scalar(self, *_args, **_kwargs):
+                return _Fx()
+
+        converted = await _quote_order_money(
+            _FxSession(),
+            gross_amount="3.50",
+            net_amount="5",
+            amount_usd="3.50",
+            currency="RUB",
+        )
+        assert converted["currency"] == "USD"
+        assert converted["net_rub"] == Decimal("3.50") * Decimal("83.9971")
+
     asyncio.run(run())
+
+
+def test_cbr_xml_and_unconverted_usd_detection() -> None:
+    from store.domain.money import looks_unconverted_usd, parse_cbr_daily_xml
+
+    xml = """<?xml version="1.0" encoding="windows-1251"?>
+    <ValCurs Date="15.08.2026" name="Foreign Currency Market">
+      <Valute ID="R01235"><CharCode>USD</CharCode><Nominal>1</Nominal><Value>83,9971</Value></Valute>
+      <Valute ID="R01239"><CharCode>EUR</CharCode><Nominal>1</Nominal><Value>98,1200</Value></Valute>
+    </ValCurs>
+    """
+    day, rates = parse_cbr_daily_xml(xml)
+    assert day.isoformat() == "2026-08-15"
+    assert rates["USD"] == Decimal("83.9971")
+    assert rates["EUR"] == Decimal("98.1200")
+    assert looks_unconverted_usd("5", "3.50")
+    assert looks_unconverted_usd("3.50", "3.50")
+    assert not looks_unconverted_usd("293.99", "3.50")
 
 
 def test_401_refresh_keeps_original_query_parameters() -> None:

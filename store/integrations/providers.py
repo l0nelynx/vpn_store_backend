@@ -209,6 +209,7 @@ class DigisellerAdapter:
 
         amount = pick("amount")
         profit = pick("profit")
+        amount_usd = pick("amount_usd")
         net: Any = profit
         if net is None and amount is not None:
             net = amount
@@ -220,12 +221,19 @@ class DigisellerAdapter:
                         net = Decimal(str(amount)) * (Decimal("100") - percent) / Decimal("100")
                 except (InvalidOperation, ValueError):
                     pass
-        currency = self.normalize_currency(pick("type_curr", "currency", "currency_type")) or "RUB"
+        currency = self.normalize_currency(pick("type_curr", "currency", "currency_type"))
+        if currency is None:
+            try:
+                amt = Decimal(str(amount)) if amount not in (None, "") else None
+                usd = Decimal(str(amount_usd)) if amount_usd not in (None, "") else None
+            except (InvalidOperation, ValueError):
+                amt = usd = None
+            currency = "USD" if amt is not None and usd is not None and abs(amt - usd) <= Decimal("0.05") else "RUB"
         return {
             "gross_amount": amount,
             "net_amount": net,
             "profit_amount": profit,
-            "amount_usd": pick("amount_usd"),
+            "amount_usd": amount_usd,
             "currency": currency,
             "gross_currency": currency,
             "net_currency": currency,
