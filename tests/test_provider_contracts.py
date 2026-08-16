@@ -172,7 +172,10 @@ def test_quote_order_money_maps_wmr_profit_to_net_rub() -> None:
 
 
 def test_fx_json_and_unconverted_usd_detection() -> None:
-    from store.domain.money import looks_unconverted_usd, parse_jsdelivr_usd_json, parse_open_er_api_json
+    from types import SimpleNamespace
+
+    from store.domain.money import looks_unconverted_usd, parse_jsdelivr_usd_json, parse_open_er_api_json, quote_order_revenue_rub
+    from store.services.fx import order_revenue_rub
 
     jsdelivr = {"date": "2026-08-15", "usd": {"rub": "83.9971", "eur": "0.8644"}}
     day, rates = parse_jsdelivr_usd_json(jsdelivr)
@@ -182,6 +185,38 @@ def test_fx_json_and_unconverted_usd_detection() -> None:
     assert looks_unconverted_usd("5", "3.50")
     assert looks_unconverted_usd("3.50", "3.50")
     assert not looks_unconverted_usd("293.99", "3.50")
+
+    rate = Decimal("83.9851108")
+    assert quote_order_revenue_rub(
+        net_rub="5", amount="5", amount_usd="3.50", currency="RUB", usd_rate=rate
+    ) == Decimal("3.50") * rate
+    assert quote_order_revenue_rub(
+        net_rub="0", amount="3.50", currency="USD", usd_rate=rate
+    ) == Decimal("3.50") * rate
+    assert quote_order_revenue_rub(
+        net_rub=None, amount="3.50", currency="WMZ", usd_rate=rate
+    ) == Decimal("3.50") * rate
+    assert quote_order_revenue_rub(
+        net_rub="293.99", amount_usd="3.50", currency="RUB", usd_rate=rate
+    ) == Decimal("293.99")
+    assert quote_order_revenue_rub(
+        net_rub="142.50", profit_amount="142.50", currency="WMR", amount_usd="1.60", usd_rate=rate
+    ) == Decimal("142.50")
+    assert order_revenue_rub(
+        SimpleNamespace(
+            net_rub=Decimal("0"),
+            profit_amount=None,
+            net_amount=Decimal("3.50"),
+            gross_amount=Decimal("3.50"),
+            amount=Decimal("3.50"),
+            amount_usd=None,
+            currency="RUB",
+            net_currency="RUB",
+            raw={"amount": "3.50", "type_curr": "WMZ"},
+        ),
+        rate,
+        None,
+    ) == Decimal("3.50") * rate
 
     open_er = {
         "time_last_update_utc": "Sun, 16 Aug 2026 00:02:31 +0000",

@@ -9,11 +9,17 @@ from decimal import Decimal
 from typing import Any
 
 import aiohttp
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from store.database.models import FxRate, Order, async_session
-from store.domain.money import as_decimal, looks_unconverted_usd, parse_jsdelivr_usd_json, parse_open_er_api_json
+from store.domain.money import (
+    as_decimal,
+    looks_unconverted_usd,
+    parse_jsdelivr_usd_json,
+    parse_open_er_api_json,
+    quote_order_revenue_rub,
+)
 from store.integrations.providers import canonical_currency
 
 logger = logging.getLogger(__name__)
@@ -71,24 +77,30 @@ async def fetch_fx_rates() -> tuple[date, dict[str, Decimal], str]:
     raise RuntimeError("FX providers failed: " + "; ".join(errors))
 
 
-async def refresh_fx_rates() -> dict[str, Decimal]:
+async def refresh_fx_rates(*, force: bool = False) -> dict[str, Decimal]:
     async with _refresh_lock:
+        if not force:
+            async with async_session() as session:
+                if await latest_rate(session, "USD"):
+                    return {}
         rate_date, rates, source = await fetch_fx_rates()
         if not rates:
             return {}
         moment = _rate_datetime(rate_date)
+        quantum = Decimal("0.0000000001")
         async with async_session() as session:
             for code, rate in rates.items():
+                stored = rate.quantize(quantum)
                 stmt = insert(FxRate).values(
                     rate_date=moment,
                     base_currency=code,
                     quote_currency="RUB",
-                    rate=rate,
+                    rate=stored,
                     source=source,
                 )
                 stmt = stmt.on_conflict_do_update(
                     constraint="uq_fx_rates_key",
-                    set_={"rate": rate, "source": source},
+                    set_={"rate": stored, "source": source},
                 )
                 await session.execute(stmt)
             await session.commit()
@@ -134,64 +146,56 @@ async def ensure_rate(session, base: str) -> FxRate | None:
     return await latest_rate(session, code)
 
 
-def _latest_rate_subquery(base: str):
-    return (
-        select(FxRate.rate)
-        .where(FxRate.base_currency == base, FxRate.quote_currency == "RUB")
-        .order_by(FxRate.rate_date.desc())
-        .limit(1)
-        .scalar_subquery()
+async def loaded_quote_rates(session) -> tuple[Decimal | None, Decimal | None]:
+    usd = await latest_rate(session, "USD")
+    eur = await latest_rate(session, "EUR")
+    return (usd.rate if usd else None, eur.rate if eur else None)
+
+
+def recovered_order_currency(order: Order) -> str | None:
+    curr = canonical_currency(order.net_currency or order.currency)
+    if curr in USD_CODES | EUR_CODES:
+        return curr
+    raw = order.raw if isinstance(getattr(order, "raw", None), dict) else {}
+    content = raw.get("content") if isinstance(raw.get("content"), dict) else {}
+    for source in (raw, content):
+        recovered = canonical_currency(
+            source.get("type_curr") or source.get("currency") or source.get("currency_type")
+        )
+        if recovered in USD_CODES | EUR_CODES:
+            return recovered
+    return curr
+
+
+def order_revenue_rub(order: Order, usd_rate: Decimal | None, eur_rate: Decimal | None) -> Decimal:
+    curr = recovered_order_currency(order)
+    return quote_order_revenue_rub(
+        net_rub=order.net_rub,
+        profit_amount=order.profit_amount,
+        net_amount=order.net_amount,
+        gross_amount=order.gross_amount,
+        amount=order.amount,
+        amount_usd=order.amount_usd,
+        currency=curr,
+        net_currency=curr,
+        usd_rate=usd_rate,
+        eur_rate=eur_rate,
     )
 
 
-def revenue_rub_expr():
-    """Ruble net proceeds: never treat USD/EUR source amounts as rubles."""
-    curr = func.upper(func.coalesce(Order.net_currency, Order.currency, ""))
-    native = func.coalesce(Order.profit_amount, Order.net_amount, Order.gross_amount, Order.amount)
-    usd_rate = _latest_rate_subquery("USD")
-    eur_rate = _latest_rate_subquery("EUR")
-    unconverted = and_(
-        Order.amount_usd.is_not(None),
-        Order.amount_usd > 0,
-        func.coalesce(Order.net_rub, native).is_not(None),
-        func.coalesce(Order.net_rub, native) <= Order.amount_usd * 2,
-    )
-    trusted_rub = case((unconverted, None), else_=Order.net_rub)
-    rub_native = case(
-        (and_(or_(curr.in_(tuple(RUB_CODES)), curr == ""), ~unconverted), native),
-        else_=None,
-    )
-    return func.coalesce(
-        trusted_rub,
-        rub_native,
-        Order.amount_usd * usd_rate,
-        case((curr.in_(tuple(USD_CODES)), native * usd_rate), else_=None),
-        case((curr.in_(tuple(EUR_CODES)), native * eur_rate), else_=None),
-    )
-
-
-def gross_rub_expr():
-    curr = func.upper(func.coalesce(Order.gross_currency, Order.currency, ""))
-    native = func.coalesce(Order.gross_amount, Order.amount)
-    usd_rate = _latest_rate_subquery("USD")
-    eur_rate = _latest_rate_subquery("EUR")
-    unconverted = and_(
-        Order.amount_usd.is_not(None),
-        Order.amount_usd > 0,
-        func.coalesce(Order.gross_rub, native).is_not(None),
-        func.coalesce(Order.gross_rub, native) <= Order.amount_usd * 2,
-    )
-    trusted_rub = case((unconverted, None), else_=Order.gross_rub)
-    rub_native = case(
-        (and_(or_(curr.in_(tuple(RUB_CODES)), curr == ""), ~unconverted), native),
-        else_=None,
-    )
-    return func.coalesce(
-        trusted_rub,
-        rub_native,
-        Order.amount_usd * usd_rate,
-        case((curr.in_(tuple(USD_CODES)), native * usd_rate), else_=None),
-        case((curr.in_(tuple(EUR_CODES)), native * eur_rate), else_=None),
+def order_gross_rub(order: Order, usd_rate: Decimal | None, eur_rate: Decimal | None) -> Decimal:
+    curr = recovered_order_currency(order) or canonical_currency(order.gross_currency or order.currency)
+    return quote_order_revenue_rub(
+        net_rub=order.gross_rub,
+        profit_amount=None,
+        net_amount=order.gross_amount,
+        gross_amount=order.gross_amount,
+        amount=order.amount,
+        amount_usd=order.amount_usd,
+        currency=curr,
+        net_currency=curr,
+        usd_rate=usd_rate,
+        eur_rate=eur_rate,
     )
 
 
@@ -206,9 +210,9 @@ async def convert_to_rub(
     amount = as_decimal(value)
     usd = as_decimal(amount_usd)
     curr = canonical_currency(currency)
-    if curr not in EUR_CODES and looks_unconverted_usd(amount if amount is not None else usd, usd):
+    if (not curr or curr in RUB_CODES) and looks_unconverted_usd(amount if amount is not None else usd, usd):
         curr = "USD"
-        amount = usd
+        amount = usd if usd is not None else amount
     if amount is None:
         return None, None, curr
     if not curr or curr in RUB_CODES:
@@ -224,22 +228,25 @@ async def convert_to_rub(
 
 
 async def backfill_order_rub_amounts() -> dict[str, int]:
+    await ensure_fx_rates()
     updated = skipped = 0
     async with async_session() as session:
         rows = (
             await session.scalars(
                 select(Order).where(
                     or_(
+                        Order.marketplace == "digiseller",
                         func.upper(func.coalesce(Order.currency, "")).in_(tuple(USD_CODES | EUR_CODES)),
                         and_(Order.amount_usd.is_not(None), Order.amount_usd > 0),
                         Order.net_rub.is_(None),
+                        Order.net_rub == 0,
                     )
                 )
             )
         ).all()
         for order in rows:
             native = order.net_amount or order.profit_amount or order.gross_amount or order.amount
-            currency = canonical_currency(order.net_currency or order.currency)
+            currency = recovered_order_currency(order)
             net_rub, fx, curr = await convert_to_rub(
                 session,
                 native,

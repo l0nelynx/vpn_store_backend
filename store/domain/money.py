@@ -16,6 +16,74 @@ def as_decimal(value: Any) -> Decimal | None:
         return None
 
 
+RUB_CODES = {"RUB", "RUR", "WMR", ""}
+USD_CODES = {"USD", "WMZ"}
+EUR_CODES = {"EUR", "WME"}
+
+
+def canonical_money_currency(raw: Any) -> str:
+    if raw in (None, ""):
+        return ""
+    code = str(raw).strip().upper()
+    return {
+        "WMR": "RUB",
+        "RUR": "RUB",
+        "RUB": "RUB",
+        "WMZ": "USD",
+        "USD": "USD",
+        "WME": "EUR",
+        "EUR": "EUR",
+    }.get(code, code)
+
+
+def quote_order_revenue_rub(
+    *,
+    net_rub: Any = None,
+    profit_amount: Any = None,
+    net_amount: Any = None,
+    gross_amount: Any = None,
+    amount: Any = None,
+    amount_usd: Any = None,
+    currency: Any = None,
+    net_currency: Any = None,
+    usd_rate: Decimal | None = None,
+    eur_rate: Decimal | None = None,
+) -> Decimal:
+    """Net proceeds in RUB. USD/EUR source amounts are converted; stored rubles are kept."""
+    stored = as_decimal(net_rub)
+    native = as_decimal(profit_amount) or as_decimal(net_amount) or as_decimal(gross_amount) or as_decimal(amount)
+    usd = as_decimal(amount_usd)
+    curr = canonical_money_currency(net_currency or currency)
+    usd_rate = usd_rate if usd_rate and usd_rate > 0 else None
+    eur_rate = eur_rate if eur_rate and eur_rate > 0 else None
+
+    def as_usd_rub(source: Decimal | None) -> Decimal | None:
+        if source is None or usd_rate is None:
+            return None
+        return source * usd_rate
+
+    if curr in USD_CODES:
+        source = native if native is not None else usd if usd is not None else stored
+        return as_usd_rub(source) or Decimal("0")
+    if curr in EUR_CODES:
+        source = native if native is not None else stored
+        if source is not None and eur_rate:
+            return source * eur_rate
+        return source or Decimal("0")
+    if looks_unconverted_usd(stored if stored is not None else native, usd):
+        source = native if native is not None else usd
+        if usd is not None and native is not None and native == stored:
+            source = usd
+        return as_usd_rub(source) or Decimal("0")
+    if stored is not None and stored > 0:
+        return stored
+    if usd is not None:
+        converted = as_usd_rub(usd)
+        if converted is not None:
+            return converted
+    return stored or native or Decimal("0")
+
+
 def looks_unconverted_usd(native: Any, amount_usd: Any) -> bool:
     """True when a stored total is the USD figure rather than rubles."""
     usd = as_decimal(amount_usd)

@@ -33,7 +33,7 @@ from store.integrations.providers import digiseller, ggsel
 from store.domain.pipeline import PipelineDefinition, evaluate_condition, mask_secrets, render_template, render_value, validate_pipeline
 from store.services import pipelines
 from store.services.catalog_sync import sync_all_catalogs
-from store.services.fx import ensure_fx_rates, gross_rub_expr, revenue_rub_expr
+from store.services.fx import ensure_fx_rates, loaded_quote_rates, order_gross_rub, order_revenue_rub
 from store.services.integrations import execute_http_action, save_profile_secret
 from store.services.order_sync import sync_all_orders
 from store.services.runtime import enqueue
@@ -418,8 +418,10 @@ async def analytics_overview():
     async with async_session() as session:
         order_count = await session.scalar(select(func.count(Order.id))) or 0
         delivered = await session.scalar(select(func.count(Order.id)).where(Order.delivery_status == 1)) or 0
-        gross = await session.scalar(select(func.coalesce(func.sum(gross_rub_expr()), 0))) or 0
-        net = await session.scalar(select(func.coalesce(func.sum(revenue_rub_expr()), 0))) or 0
+        usd_rate, eur_rate = await loaded_quote_rates(session)
+        orders = (await session.scalars(select(Order))).all()
+        gross = sum((order_gross_rub(order, usd_rate, eur_rate) for order in orders), Decimal("0"))
+        net = sum((order_revenue_rub(order, usd_rate, eur_rate) for order in orders), Decimal("0"))
         needs_review = await session.scalar(select(func.count(PipelineRun.id)).where(PipelineRun.status == "needs_review")) or 0
         dead_letters = await session.scalar(select(func.count(DeadLetterJob.id))) or 0
         providers = (
@@ -449,7 +451,7 @@ async def analytics_overview():
                 .limit(10)
             )
         ).all()
-        return {"orders": order_count, "delivered": delivered, "gross_rub": gross, "net_rub": net,
+        return {"orders": order_count, "delivered": delivered, "gross_rub": float(gross), "net_rub": float(net),
                 "needs_review": needs_review, "dead_letters": dead_letters,
                 "digiseller_p95_seconds": p95_digiseller,
                 "digiseller_sync_limit_seconds": 12,
@@ -469,6 +471,8 @@ _SERIES_RANGES: dict[str, tuple[timedelta, str, timedelta]] = {
 
 
 def _truncate_bucket(moment: datetime, unit: str) -> datetime:
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
     moment = moment.astimezone(timezone.utc)
     if unit == "hour":
         return moment.replace(minute=0, second=0, microsecond=0)
@@ -519,34 +523,22 @@ async def analytics_series(
         await ensure_fx_rates()
     except Exception:
         pass
-    bucket_expr = func.date_trunc(unit, Order.created_at)
-    value_expr = (
-        func.count(Order.id)
-        if metric == "orders"
-        else func.coalesce(func.sum(revenue_rub_expr()), 0)
-    )
-    async with async_session() as session:
-        rows = (
-            await session.execute(
-                select(bucket_expr.label("bucket"), Order.marketplace, value_expr.label("value"))
-                .where(Order.created_at >= since)
-                .group_by(bucket_expr, Order.marketplace)
-                .order_by(bucket_expr)
-            )
-        ).all()
-
     by_bucket: dict[datetime, dict[str, float]] = {}
-    for bucket, marketplace, value in rows:
-        if bucket is None or not marketplace:
-            continue
-        key = bucket if bucket.tzinfo else bucket.replace(tzinfo=timezone.utc)
-        key = key.astimezone(timezone.utc)
-        cell = by_bucket.setdefault(key, {"ggsel": 0.0, "digiseller": 0.0})
-        market = str(marketplace).lower()
-        if market not in cell:
-            cell[market] = 0.0
-        amount = float(value) if isinstance(value, (int, float, Decimal)) else float(value or 0)
-        cell[market] = amount
+    async with async_session() as session:
+        usd_rate, eur_rate = await loaded_quote_rates(session)
+        orders = (await session.scalars(select(Order).where(Order.created_at >= since))).all()
+        for order in orders:
+            if not order.created_at or not order.marketplace:
+                continue
+            key = _truncate_bucket(order.created_at, unit)
+            cell = by_bucket.setdefault(key, {"ggsel": 0.0, "digiseller": 0.0})
+            market = str(order.marketplace).lower()
+            if market not in cell:
+                cell[market] = 0.0
+            if metric == "orders":
+                cell[market] += 1.0
+            else:
+                cell[market] += float(order_revenue_rub(order, usd_rate, eur_rate))
 
     series = []
     for bucket in _iter_buckets(since, now, unit):

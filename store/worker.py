@@ -58,7 +58,7 @@ async def outbox_loop() -> None:
 async def fx_loop() -> None:
     while True:
         try:
-            await refresh_fx_rates()
+            await refresh_fx_rates(force=True)
             summary = await backfill_order_rub_amounts()
             logger.info("FX maintenance: %s", summary)
         except Exception:
