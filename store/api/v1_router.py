@@ -412,16 +412,31 @@ async def order_events(order_id: int):
         return [{"id": row.id, "type": row.type, "payload": row.payload, "created_at": row.created_at.isoformat()} for row in rows]
 
 
+_SERIES_RANGES: dict[str, tuple[timedelta, str, timedelta]] = {
+    # lookback, date_trunc unit, step between buckets
+    "day": (timedelta(hours=24), "hour", timedelta(hours=1)),
+    "week": (timedelta(days=7), "day", timedelta(days=1)),
+    "month": (timedelta(days=30), "day", timedelta(days=1)),
+    "3m": (timedelta(days=90), "week", timedelta(days=7)),
+    "6m": (timedelta(days=180), "week", timedelta(days=7)),
+    "year": (timedelta(days=365), "month", timedelta(days=31)),
+}
+
+AnalyticsRange = Literal["day", "week", "month", "3m", "6m", "year"]
+
+
 @router.get("/analytics/overview")
-async def analytics_overview():
+async def analytics_overview(range: AnalyticsRange = Query("month")):
     await ensure_fx_rates()
+    lookback, _, _ = _SERIES_RANGES[range]
+    since = datetime.now(timezone.utc) - lookback
     async with async_session() as session:
         order_count = await session.scalar(select(func.count(Order.id))) or 0
         delivered = await session.scalar(select(func.count(Order.id)).where(Order.delivery_status == 1)) or 0
         usd_rate, eur_rate = await loaded_quote_rates(session)
-        orders = (await session.scalars(select(Order))).all()
-        gross = sum((order_gross_rub(order, usd_rate, eur_rate) for order in orders), Decimal("0"))
-        net = sum((order_revenue_rub(order, usd_rate, eur_rate) for order in orders), Decimal("0"))
+        money_orders = (await session.scalars(select(Order).where(Order.created_at >= since))).all()
+        gross = sum((order_gross_rub(order, usd_rate, eur_rate) for order in money_orders), Decimal("0"))
+        net = sum((order_revenue_rub(order, usd_rate, eur_rate) for order in money_orders), Decimal("0"))
         needs_review = await session.scalar(select(func.count(PipelineRun.id)).where(PipelineRun.status == "needs_review")) or 0
         dead_letters = await session.scalar(select(func.count(DeadLetterJob.id))) or 0
         providers = (
@@ -452,22 +467,12 @@ async def analytics_overview():
             )
         ).all()
         return {"orders": order_count, "delivered": delivered, "gross_rub": float(gross), "net_rub": float(net),
+                "range": range,
                 "needs_review": needs_review, "dead_letters": dead_letters,
                 "digiseller_p95_seconds": p95_digiseller,
                 "digiseller_sync_limit_seconds": 12,
                 "step_errors": [{"code": code or "unknown", "count": count} for code, count in step_errors],
                 "providers": [{"provider": provider, "orders": count} for provider, count in providers]}
-
-
-_SERIES_RANGES: dict[str, tuple[timedelta, str, timedelta]] = {
-    # lookback, date_trunc unit, step between buckets
-    "day": (timedelta(hours=24), "hour", timedelta(hours=1)),
-    "week": (timedelta(days=7), "day", timedelta(days=1)),
-    "month": (timedelta(days=30), "day", timedelta(days=1)),
-    "3m": (timedelta(days=90), "week", timedelta(days=7)),
-    "6m": (timedelta(days=180), "week", timedelta(days=7)),
-    "year": (timedelta(days=365), "month", timedelta(days=31)),
-}
 
 
 def _truncate_bucket(moment: datetime, unit: str) -> datetime:
@@ -513,7 +518,7 @@ def _iter_buckets(since: datetime, until: datetime, unit: str) -> list[datetime]
 
 @router.get("/analytics/series")
 async def analytics_series(
-    range: Literal["day", "week", "month", "3m", "6m", "year"] = Query("week"),
+    range: AnalyticsRange = Query("month"),
     metric: Literal["orders", "revenue"] = Query("orders"),
 ):
     lookback, unit, _ = _SERIES_RANGES[range]

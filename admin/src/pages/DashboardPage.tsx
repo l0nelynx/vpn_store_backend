@@ -69,19 +69,18 @@ function formatBucket(value: string, range: RangeKey) {
 export default function DashboardPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
-  const [range, setRange] = useState<RangeKey>("week");
+  const [range, setRange] = useState<RangeKey>("month");
   const [metric, setMetric] = useState<MetricKey>("orders");
   const [series, setSeries] = useState<SeriesPoint[]>([]);
 
   useEffect(() => {
-    Promise.all([
-      api<Overview>("/store/api/v1/analytics/overview"),
-      api<Health>("/store/api/v1/integration-health"),
-    ]).then(([a, h]) => {
-      setData(a);
-      setHealth(h);
-    });
+    api<Health>("/store/api/v1/integration-health").then(setHealth);
   }, []);
+
+  useEffect(() => {
+    const qs = new URLSearchParams({ range });
+    api<Overview>(`/store/api/v1/analytics/overview?${qs}`).then(setData);
+  }, [range]);
 
   useEffect(() => {
     const qs = new URLSearchParams({ range, metric });
@@ -99,9 +98,11 @@ export default function DashboardPage() {
     [series, range],
   );
 
-  const cards = [
+  const opsCards = [
     ["Orders", data?.orders || 0, PackageCheck],
     ["Delivered", data?.delivered || 0, CheckCircle2],
+  ] as const;
+  const proceedsCards = [
     ["Gross", money(data?.gross_rub), CircleDollarSign],
     ["Net proceeds", money(data?.net_rub), Workflow],
   ] as const;
@@ -122,16 +123,39 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(([label, value, Icon]) => (
-          <Card key={label}>
-            <div className="flex items-center justify-between text-muted-foreground">
-              <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
-              <Icon className="h-4 w-4" />
-            </div>
-            <div className="mt-5 text-2xl font-semibold tabular-nums">{value}</div>
-          </Card>
-        ))}
+      <section className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {opsCards.map(([label, value, Icon]) => (
+            <Card key={label}>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+                <Icon className="h-4 w-4" />
+              </div>
+              <div className="mt-5 text-2xl font-semibold tabular-nums">{value}</div>
+            </Card>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Proceeds</p>
+          <Select
+            aria-label="Proceeds period"
+            className="sm:w-36"
+            value={range}
+            onValueChange={(value) => setRange(value as RangeKey)}
+            options={RANGE_OPTIONS}
+          />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {proceedsCards.map(([label, value, Icon]) => (
+            <Card key={label}>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+                <Icon className="h-4 w-4" />
+              </div>
+              <div className="mt-5 text-2xl font-semibold tabular-nums">{value}</div>
+            </Card>
+          ))}
+        </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
