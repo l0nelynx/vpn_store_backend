@@ -11,7 +11,7 @@ from aiogram import Dispatcher
 
 from store.api.remnawave.users_bulk import backfill_order_user_ids
 from store.database.models import async_main
-from store.services.fx import backfill_order_rub_amounts, refresh_cbr_rates
+from store.services.fx import backfill_order_rub_amounts, refresh_fx_rates
 from store.services.messaging import poll_unread_chats
 from store.services.order_sync import sync_ggsel_orders
 from store.services.pipelines import bootstrap_legacy_pipelines
@@ -58,7 +58,7 @@ async def outbox_loop() -> None:
 async def fx_loop() -> None:
     while True:
         try:
-            await refresh_cbr_rates()
+            await refresh_fx_rates()
             summary = await backfill_order_rub_amounts()
             logger.info("FX maintenance: %s", summary)
         except Exception:

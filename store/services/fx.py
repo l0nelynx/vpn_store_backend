@@ -1,4 +1,4 @@
-"""CBR FX rates and ruble quoting for analytics."""
+"""USD/EUR to RUB quotes from public HTTPS APIs outside Russia."""
 
 from __future__ import annotations
 
@@ -13,36 +13,67 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from store.database.models import FxRate, Order, async_session
-from store.domain.money import as_decimal, looks_unconverted_usd, parse_cbr_daily_xml
+from store.domain.money import as_decimal, looks_unconverted_usd, parse_jsdelivr_usd_json, parse_open_er_api_json
 from store.integrations.providers import canonical_currency
 
 logger = logging.getLogger(__name__)
 
-CBR_DAILY_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
+# Cloudflare / jsDelivr first; ExchangeRate-API (open.er-api.com) as fallback.
+# Russian and government hosts are intentionally not used.
+FX_SOURCES = (
+    (
+        "jsdelivr",
+        "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json",
+        parse_jsdelivr_usd_json,
+    ),
+    (
+        "cloudflare-pages",
+        "https://latest.currency-api.pages.dev/v1/currencies/usd.min.json",
+        parse_jsdelivr_usd_json,
+    ),
+    (
+        "open-er-api",
+        "https://open.er-api.com/v6/latest/USD",
+        parse_open_er_api_json,
+    ),
+)
+_HEADERS = {"Accept": "application/json", "User-Agent": "vpn-store-backend/2.0"}
 RUB_CODES = {"RUB", "RUR", "WMR"}
 USD_CODES = {"USD", "WMZ"}
 EUR_CODES = {"EUR", "WME"}
 _refresh_lock = asyncio.Lock()
 
 
-async def fetch_cbr_rates(day: date | None = None) -> tuple[date, dict[str, Decimal]]:
-    params = {"date_req": day.strftime("%d/%m/%Y")} if day else {}
-    timeout = aiohttp.ClientTimeout(total=15)
-    async with aiohttp.ClientSession(timeout=timeout) as http:
-        async with http.get(CBR_DAILY_URL, params=params) as response:
-            raw = await response.read()
-            if response.status >= 400:
-                raise RuntimeError(f"CBR HTTP {response.status}")
-    return parse_cbr_daily_xml(raw)
-
-
 def _rate_datetime(day: date) -> datetime:
     return datetime.combine(day, time.min, tzinfo=timezone.utc)
 
 
-async def refresh_cbr_rates(day: date | None = None) -> dict[str, Decimal]:
+async def fetch_fx_rates() -> tuple[date, dict[str, Decimal], str]:
+    timeout = aiohttp.ClientTimeout(total=12)
+    errors: list[str] = []
+    async with aiohttp.ClientSession(timeout=timeout, headers=_HEADERS) as http:
+        for source, url, parser in FX_SOURCES:
+            try:
+                async with http.get(url) as response:
+                    if response.status >= 400:
+                        errors.append(f"{source} HTTP {response.status}")
+                        continue
+                    payload = await response.json(content_type=None)
+                if not isinstance(payload, dict):
+                    errors.append(f"{source} invalid json")
+                    continue
+                rate_date, rates = parser(payload)
+                if "USD" in rates:
+                    return rate_date, rates, source
+                errors.append(f"{source} missing USD/RUB")
+            except Exception as exc:
+                errors.append(f"{source}: {exc}")
+    raise RuntimeError("FX providers failed: " + "; ".join(errors))
+
+
+async def refresh_fx_rates() -> dict[str, Decimal]:
     async with _refresh_lock:
-        rate_date, rates = await fetch_cbr_rates(day)
+        rate_date, rates, source = await fetch_fx_rates()
         if not rates:
             return {}
         moment = _rate_datetime(rate_date)
@@ -53,26 +84,26 @@ async def refresh_cbr_rates(day: date | None = None) -> dict[str, Decimal]:
                     base_currency=code,
                     quote_currency="RUB",
                     rate=rate,
-                    source="cbr",
+                    source=source,
                 )
                 stmt = stmt.on_conflict_do_update(
                     constraint="uq_fx_rates_key",
-                    set_={"rate": rate, "source": "cbr"},
+                    set_={"rate": rate, "source": source},
                 )
                 await session.execute(stmt)
             await session.commit()
-        logger.info("CBR rates %s: %s", rate_date.isoformat(), rates)
+        logger.info("FX rates %s from %s: %s", rate_date.isoformat(), source, rates)
         return rates
 
 
-async def ensure_cbr_rates() -> dict[str, Decimal]:
+async def ensure_fx_rates() -> dict[str, Decimal]:
     async with async_session() as session:
         if await latest_rate(session, "USD"):
             return {}
     try:
-        return await refresh_cbr_rates()
+        return await refresh_fx_rates()
     except Exception:
-        logger.exception("CBR rate warmup failed")
+        logger.exception("FX rate warmup failed")
         return {}
 
 
@@ -96,9 +127,9 @@ async def ensure_rate(session, base: str) -> FxRate | None:
     if not code or code in RUB_CODES:
         return None
     try:
-        await refresh_cbr_rates()
+        await refresh_fx_rates()
     except Exception:
-        logger.exception("CBR refresh failed for %s", code)
+        logger.exception("FX refresh failed for %s", code)
         return None
     return await latest_rate(session, code)
 

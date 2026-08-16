@@ -5,9 +5,6 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from xml.etree import ElementTree
-
-TRACKED_CBR = ("USD", "EUR")
 
 
 def as_decimal(value: Any) -> Decimal | None:
@@ -30,22 +27,37 @@ def looks_unconverted_usd(native: Any, amount_usd: Any) -> bool:
     return value <= usd * Decimal("2")
 
 
-def parse_cbr_daily_xml(payload: str | bytes) -> tuple[date, dict[str, Decimal]]:
-    if isinstance(payload, bytes):
-        text = payload.decode("windows-1251")
-    else:
-        text = payload
-    root = ElementTree.fromstring(text)
-    raw_date = root.attrib.get("Date") or ""
-    rate_date = datetime.strptime(raw_date, "%d.%m.%Y").date() if raw_date else date.today()
+def _usd_map_to_quote_rates(usd_to: dict[str, Any]) -> dict[str, Decimal]:
+    by_code = {str(key).upper(): as_decimal(value) for key, value in usd_to.items()}
+    rub = by_code.get("RUB")
+    eur = by_code.get("EUR")
     rates: dict[str, Decimal] = {}
-    for valute in root.findall("Valute"):
-        code = (valute.findtext("CharCode") or "").strip().upper()
-        if code not in TRACKED_CBR:
-            continue
-        nominal = as_decimal(valute.findtext("Nominal")) or Decimal("1")
-        value = as_decimal(valute.findtext("Value"))
-        if value is None or nominal <= 0:
-            continue
-        rates[code] = value / nominal
-    return rate_date, rates
+    if rub and rub > 0:
+        rates["USD"] = rub
+        if eur and eur > 0:
+            rates["EUR"] = rub / eur
+    return rates
+
+
+def parse_jsdelivr_usd_json(payload: dict[str, Any]) -> tuple[date, dict[str, Decimal]]:
+    raw_date = str(payload.get("date") or "")
+    try:
+        rate_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except ValueError:
+        rate_date = date.today()
+    usd_to = payload.get("usd") if isinstance(payload.get("usd"), dict) else {}
+    return rate_date, _usd_map_to_quote_rates(usd_to)
+
+
+def parse_open_er_api_json(payload: dict[str, Any]) -> tuple[date, dict[str, Decimal]]:
+    raw = payload.get("time_last_update_utc") or payload.get("date") or ""
+    rate_date = date.today()
+    if isinstance(raw, str) and raw:
+        for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%Y-%m-%d"):
+            try:
+                rate_date = datetime.strptime(raw, fmt).date()
+                break
+            except ValueError:
+                continue
+    quotes = payload.get("rates") if isinstance(payload.get("rates"), dict) else {}
+    return rate_date, _usd_map_to_quote_rates(quotes)

@@ -33,7 +33,7 @@ from store.integrations.providers import digiseller, ggsel
 from store.domain.pipeline import PipelineDefinition, evaluate_condition, mask_secrets, render_template, render_value, validate_pipeline
 from store.services import pipelines
 from store.services.catalog_sync import sync_all_catalogs
-from store.services.fx import ensure_cbr_rates, gross_rub_expr, revenue_rub_expr
+from store.services.fx import ensure_fx_rates, gross_rub_expr, revenue_rub_expr
 from store.services.integrations import execute_http_action, save_profile_secret
 from store.services.order_sync import sync_all_orders
 from store.services.runtime import enqueue
@@ -414,7 +414,7 @@ async def order_events(order_id: int):
 
 @router.get("/analytics/overview")
 async def analytics_overview():
-    await ensure_cbr_rates()
+    await ensure_fx_rates()
     async with async_session() as session:
         order_count = await session.scalar(select(func.count(Order.id))) or 0
         delivered = await session.scalar(select(func.count(Order.id)).where(Order.delivery_status == 1)) or 0
@@ -516,7 +516,7 @@ async def analytics_series(
     now = datetime.now(timezone.utc)
     since = now - lookback
     try:
-        await ensure_cbr_rates()
+        await ensure_fx_rates()
     except Exception:
         pass
     bucket_expr = func.date_trunc(unit, Order.created_at)

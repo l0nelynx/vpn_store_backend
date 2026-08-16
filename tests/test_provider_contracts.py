@@ -171,22 +171,25 @@ def test_quote_order_money_maps_wmr_profit_to_net_rub() -> None:
     asyncio.run(run())
 
 
-def test_cbr_xml_and_unconverted_usd_detection() -> None:
-    from store.domain.money import looks_unconverted_usd, parse_cbr_daily_xml
+def test_fx_json_and_unconverted_usd_detection() -> None:
+    from store.domain.money import looks_unconverted_usd, parse_jsdelivr_usd_json, parse_open_er_api_json
 
-    xml = """<?xml version="1.0" encoding="windows-1251"?>
-    <ValCurs Date="15.08.2026" name="Foreign Currency Market">
-      <Valute ID="R01235"><CharCode>USD</CharCode><Nominal>1</Nominal><Value>83,9971</Value></Valute>
-      <Valute ID="R01239"><CharCode>EUR</CharCode><Nominal>1</Nominal><Value>98,1200</Value></Valute>
-    </ValCurs>
-    """
-    day, rates = parse_cbr_daily_xml(xml)
+    jsdelivr = {"date": "2026-08-15", "usd": {"rub": "83.9971", "eur": "0.8644"}}
+    day, rates = parse_jsdelivr_usd_json(jsdelivr)
     assert day.isoformat() == "2026-08-15"
     assert rates["USD"] == Decimal("83.9971")
-    assert rates["EUR"] == Decimal("98.1200")
+    assert rates["EUR"] == Decimal("83.9971") / Decimal("0.8644")
     assert looks_unconverted_usd("5", "3.50")
     assert looks_unconverted_usd("3.50", "3.50")
     assert not looks_unconverted_usd("293.99", "3.50")
+
+    open_er = {
+        "time_last_update_utc": "Sun, 16 Aug 2026 00:02:31 +0000",
+        "rates": {"USD": 1, "RUB": 83.574704, "EUR": 0.864749},
+    }
+    day, rates = parse_open_er_api_json(open_er)
+    assert day.isoformat() == "2026-08-16"
+    assert rates["USD"] == Decimal("83.574704")
 
 
 def test_401_refresh_keeps_original_query_parameters() -> None:
