@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import asyncio
 import json
+from decimal import Decimal
 
 from store.integrations.providers import DigisellerAdapter, GGSelAdapter
 from store.services.order_sync import _ggsel_order_content
@@ -75,6 +76,74 @@ def test_digiseller_supplier_signature(monkeypatch) -> None:
     assert adapter.valid_supplier_signature(payload)
     payload["sign"] = "0" * 32
     assert not adapter.valid_supplier_signature(payload)
+
+
+def test_digiseller_money_fields_use_profit_and_wmr_as_rub() -> None:
+    adapter = DigisellerAdapter()
+    fields = adapter.money_fields({
+        "id": 42,
+        "inv": 9001,
+        "amount": "150.00",
+        "profit": "142.50",
+        "type_curr": "WMR",
+        "amount_usd": "1.60",
+    })
+    assert fields["gross_amount"] == "150.00"
+    assert fields["net_amount"] == "142.50"
+    assert fields["profit_amount"] == "142.50"
+    assert fields["currency"] == "RUB"
+    assert fields["gross_currency"] == "RUB"
+    assert fields["net_currency"] == "RUB"
+    assert fields["amount_usd"] == "1.60"
+
+
+def test_digiseller_money_fields_fallback_to_amount_and_nested_content() -> None:
+    adapter = DigisellerAdapter()
+    webhook = adapter.money_fields({"amount": 200, "type_curr": "RUR"})
+    assert webhook["net_amount"] == 200
+    assert webhook["profit_amount"] is None
+    assert webhook["currency"] == "RUB"
+
+    nested = adapter.money_fields({
+        "content": {"amount": 80, "profit": "", "currency": "WMZ"},
+    })
+    assert nested["gross_amount"] == 80
+    assert nested["net_amount"] == 80
+    assert nested["currency"] == "USD"
+
+    partner = adapter.money_fields({"amount": "100", "agent_percent": 10, "type_curr": "RUB"})
+    assert partner["net_amount"] == Decimal("90")
+    assert partner["profit_amount"] is None
+
+
+def test_quote_order_money_maps_wmr_profit_to_net_rub() -> None:
+    from store.services.runtime import _quote_order_money
+
+    class _Session:
+        async def get(self, *_args, **_kwargs):
+            return None
+
+        async def scalar(self, *_args, **_kwargs):
+            return None
+
+    async def run():
+        quoted = await _quote_order_money(
+            _Session(),
+            gross_amount="150.00",
+            net_amount="142.50",
+            profit_amount="142.50",
+            currency="WMR",
+        )
+        assert quoted["currency"] == "RUB"
+        assert quoted["gross_rub"] == Decimal("150.00")
+        assert quoted["net_rub"] == Decimal("142.50")
+        assert quoted["net_amount"] == Decimal("142.50")
+
+        fallback = await _quote_order_money(_Session(), gross_amount="80", currency="RUR")
+        assert fallback["net_rub"] == Decimal("80")
+        assert fallback["profit_amount"] is None
+
+    asyncio.run(run())
 
 
 def test_401_refresh_keeps_original_query_parameters() -> None:

@@ -135,9 +135,7 @@ async def sync_digiseller_orders(top: int = 50) -> dict:
                         provider="digiseller", provider_order_id=str(inv), item_id=int(item_id), payload=content,
                         normalized_status=state, invoice_id=str(inv), email=buyer.get("email"),
                         buyer_id=str(buyer.get("buyer_id") or "") or None, options=content.get("options") or [],
-                        chat_id=str(inv), gross_amount=content.get("amount"), net_amount=content.get("profit"),
-                        profit_amount=content.get("profit"), amount_usd=content.get("amount_usd"),
-                        currency=content.get("currency") or content.get("type_curr"),
+                        chat_id=str(inv), **digiseller.money_fields(content),
                     )
                     imported += int(created)
                 except Exception:

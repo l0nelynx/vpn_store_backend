@@ -416,8 +416,11 @@ async def analytics_overview():
     async with async_session() as session:
         order_count = await session.scalar(select(func.count(Order.id))) or 0
         delivered = await session.scalar(select(func.count(Order.id)).where(Order.delivery_status == 1)) or 0
-        gross = await session.scalar(select(func.coalesce(func.sum(Order.gross_rub), 0))) or 0
-        net = await session.scalar(select(func.coalesce(func.sum(Order.net_rub), 0))) or 0
+        # Digiseller webhooks historically stored amount but left *_rub null (WMR / missing profit).
+        gross_expr = func.coalesce(Order.gross_rub, Order.gross_amount, Order.amount)
+        net_expr = func.coalesce(Order.net_rub, Order.profit_amount, Order.net_amount, Order.gross_rub, Order.amount)
+        gross = await session.scalar(select(func.coalesce(func.sum(gross_expr), 0))) or 0
+        net = await session.scalar(select(func.coalesce(func.sum(net_expr), 0))) or 0
         needs_review = await session.scalar(select(func.count(PipelineRun.id)).where(PipelineRun.status == "needs_review")) or 0
         dead_letters = await session.scalar(select(func.count(DeadLetterJob.id))) or 0
         providers = (
@@ -517,7 +520,9 @@ async def analytics_series(
     value_expr = (
         func.count(Order.id)
         if metric == "orders"
-        else func.coalesce(func.sum(Order.net_rub), 0)
+        else func.coalesce(func.sum(func.coalesce(
+            Order.net_rub, Order.profit_amount, Order.net_amount, Order.gross_rub, Order.amount,
+        )), 0)
     )
     async with async_session() as session:
         rows = (

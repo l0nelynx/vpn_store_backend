@@ -10,11 +10,30 @@ import hashlib
 import json
 import time
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import aiohttp
 
 from store.settings import secrets
+
+# Digiseller type_curr uses WebMoney ticker codes, not ISO-4217.
+CURRENCY_ALIASES = {
+    "WMR": "RUB",
+    "RUR": "RUB",
+    "RUB": "RUB",
+    "WMZ": "USD",
+    "USD": "USD",
+    "WME": "EUR",
+    "EUR": "EUR",
+}
+
+
+def canonical_currency(raw: Any) -> str | None:
+    if raw in (None, ""):
+        return None
+    code = str(raw).strip().upper()
+    return CURRENCY_ALIASES.get(code, code)
 
 
 class ProviderError(RuntimeError):
@@ -170,6 +189,47 @@ class DigisellerAdapter:
             return self.state_map.get(int(raw), "unknown")
         except (TypeError, ValueError):
             return "unknown"
+
+    def normalize_currency(self, raw: Any) -> str | None:
+        return canonical_currency(raw)
+
+    def money_fields(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Gross/net amounts for analytics. Profit is net of commissions when present."""
+        content = payload.get("content") if isinstance(payload.get("content"), dict) else {}
+
+        def pick(*keys: str) -> Any:
+            for source in (payload, content):
+                if not isinstance(source, dict):
+                    continue
+                for key in keys:
+                    value = source.get(key)
+                    if value not in (None, ""):
+                        return value
+            return None
+
+        amount = pick("amount")
+        profit = pick("profit")
+        net: Any = profit
+        if net is None and amount is not None:
+            net = amount
+            agent_percent = pick("agent_percent")
+            if agent_percent not in (None, ""):
+                try:
+                    percent = Decimal(str(agent_percent))
+                    if percent > 0:
+                        net = Decimal(str(amount)) * (Decimal("100") - percent) / Decimal("100")
+                except (InvalidOperation, ValueError):
+                    pass
+        currency = self.normalize_currency(pick("type_curr", "currency", "currency_type")) or "RUB"
+        return {
+            "gross_amount": amount,
+            "net_amount": net,
+            "profit_amount": profit,
+            "amount_usd": pick("amount_usd"),
+            "currency": currency,
+            "gross_currency": currency,
+            "net_currency": currency,
+        }
 
     def valid_supplier_signature(self, payload: dict[str, Any]) -> bool:
         password = str(secrets.get("dig_pass") or "")

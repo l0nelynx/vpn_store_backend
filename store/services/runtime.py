@@ -36,7 +36,7 @@ from store.database.models import (
     async_session,
 )
 from store.domain.pipeline import PipelineError, evaluate_condition, get_path, render_template, render_value
-from store.integrations.providers import digiseller, ggsel
+from store.integrations.providers import canonical_currency, digiseller, ggsel
 from store.services.integrations import execute_http_action
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,85 @@ def _decimal(value: Any) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+
+
+async def _quote_order_money(
+    session,
+    *,
+    gross_amount: Any = None,
+    net_amount: Any = None,
+    profit_amount: Any = None,
+    amount_usd: Any = None,
+    currency: str | None = None,
+    gross_currency: str | None = None,
+    net_currency: str | None = None,
+    existing_fx_rate_id: int | None = None,
+) -> dict[str, Any]:
+    profit_value = _decimal(profit_amount)
+    gross_value = _decimal(gross_amount)
+    net_value = _decimal(net_amount)
+    if net_value is None:
+        net_value = profit_value
+    if net_value is None:
+        net_value = gross_value
+    gross_curr = canonical_currency(gross_currency or currency)
+    net_curr = canonical_currency(net_currency or currency)
+    currency_canon = canonical_currency(currency) or gross_curr or net_curr
+    fx_rate = await session.get(FxRate, existing_fx_rate_id) if existing_fx_rate_id else None
+    currencies = {value for value in (gross_curr, net_curr) if value and value not in {"RUB"}}
+    if currencies and fx_rate is None:
+        # A single order normally has one source currency. Rates are append-only;
+        # the selected row is pinned on the order for stable historical totals.
+        fx_rate = await session.scalar(
+            select(FxRate).where(FxRate.base_currency.in_(currencies), FxRate.quote_currency == "RUB")
+            .order_by(FxRate.rate_date.desc()).limit(1)
+        )
+
+    def rub(value: Decimal | None, curr: str | None) -> Decimal | None:
+        if value is None or not curr:
+            return None
+        if curr == "RUB":
+            return value
+        return value * fx_rate.rate if fx_rate and fx_rate.base_currency.upper() == curr else None
+
+    return {
+        "gross_amount": gross_value,
+        "net_amount": net_value,
+        "profit_amount": profit_value,
+        "amount_usd": _decimal(amount_usd),
+        "amount": net_value if net_value is not None else gross_value,
+        "currency": currency_canon,
+        "gross_currency": gross_curr,
+        "net_currency": net_curr,
+        "gross_rub": rub(gross_value, gross_curr),
+        "net_rub": rub(net_value, net_curr),
+        "fx_rate_id": fx_rate.id if fx_rate else None,
+    }
+
+
+def _apply_quoted_money(order: Order, quoted: dict[str, Any], *, overwrite_net: bool) -> None:
+    def fill(field: str, value: Any, *, overwrite: bool = False) -> None:
+        if value is None:
+            return
+        if overwrite or getattr(order, field) is None:
+            setattr(order, field, value)
+
+    fill("gross_amount", quoted["gross_amount"])
+    fill("amount_usd", quoted["amount_usd"])
+    fill("gross_currency", quoted["gross_currency"])
+    fill("net_currency", quoted["net_currency"])
+    fill("currency", quoted["currency"])
+    fill("gross_rub", quoted["gross_rub"])
+    fill("fx_rate_id", quoted["fx_rate_id"])
+    fill("profit_amount", quoted["profit_amount"], overwrite=overwrite_net)
+    fill("net_amount", quoted["net_amount"], overwrite=overwrite_net)
+    fill("net_rub", quoted["net_rub"], overwrite=overwrite_net)
+    fill("amount", quoted["amount"], overwrite=overwrite_net)
+    for field in ("currency", "gross_currency", "net_currency"):
+        current = getattr(order, field)
+        canon = canonical_currency(current)
+        if canon and canon != current:
+            setattr(order, field, canon)
 
 
 async def bootstrap_templates() -> None:
@@ -183,6 +262,18 @@ async def ingest_order(
                 existing.buyer_email = email
             existing.raw = payload
             existing.raw_state = str(payload.get("invoice_state") or payload.get("state") or "")
+            quoted = await _quote_order_money(
+                session,
+                gross_amount=gross_amount if gross_amount not in (None, "") else existing.gross_amount or existing.amount,
+                net_amount=net_amount if net_amount not in (None, "") else existing.net_amount,
+                profit_amount=profit_amount if profit_amount not in (None, "") else existing.profit_amount,
+                amount_usd=amount_usd if amount_usd not in (None, "") else existing.amount_usd,
+                currency=currency or existing.currency,
+                gross_currency=gross_currency or existing.gross_currency,
+                net_currency=net_currency or existing.net_currency,
+                existing_fx_rate_id=existing.fx_rate_id,
+            )
+            _apply_quoted_money(existing, quoted, overwrite_net=profit_amount not in (None, ""))
             if normalized_status in {"refund", "returned", "overdue", "cancelled"}:
                 existing.status = existing.normalized_status = normalized_status
                 session.add(OrderEvent(
@@ -217,24 +308,16 @@ async def ingest_order(
             )
         customer = await _get_or_create_customer(email, provider, buyer_id, session)
         external = content_id if provider == "ggsel" and content_id else provider_order_id
-        gross_value, net_value = _decimal(gross_amount), _decimal(net_amount)
-        gross_curr = str(gross_currency or currency).upper() if gross_currency or currency else None
-        net_curr = str(net_currency or currency).upper() if net_currency or currency else None
-        fx_rate = None
-        currencies = {value for value in (gross_curr, net_curr) if value and value.upper() not in {"RUB", "RUR"}}
-        if currencies:
-            # A single order normally has one source currency. Rates are append-only;
-            # the selected row is pinned on the order for stable historical totals.
-            fx_rate = await session.scalar(
-                select(FxRate).where(FxRate.base_currency.in_(currencies), FxRate.quote_currency == "RUB")
-                .order_by(FxRate.rate_date.desc()).limit(1)
-            )
-        def rub(value: Decimal | None, curr: str | None) -> Decimal | None:
-            if value is None or not curr:
-                return None
-            if curr.upper() in {"RUB", "RUR"}:
-                return value
-            return value * fx_rate.rate if fx_rate and fx_rate.base_currency.upper() == curr.upper() else None
+        quoted = await _quote_order_money(
+            session,
+            gross_amount=gross_amount,
+            net_amount=net_amount,
+            profit_amount=profit_amount,
+            amount_usd=amount_usd,
+            currency=currency,
+            gross_currency=gross_currency,
+            net_currency=net_currency,
+        )
         order = Order(
             marketplace=provider,
             external_order_id=str(external),
@@ -254,17 +337,17 @@ async def ingest_order(
             buyer_email=email,
             customer_id=customer.id,
             chat_id=str(chat_id or external),
-            gross_amount=gross_value,
-            net_amount=net_value,
-            profit_amount=_decimal(profit_amount),
-            amount_usd=_decimal(amount_usd),
-            amount=_decimal(net_amount or gross_amount),
-            currency=currency,
-            gross_currency=gross_curr,
-            net_currency=net_curr,
-            gross_rub=rub(gross_value, gross_curr),
-            net_rub=rub(net_value, net_curr),
-            fx_rate_id=fx_rate.id if fx_rate else None,
+            gross_amount=quoted["gross_amount"],
+            net_amount=quoted["net_amount"],
+            profit_amount=quoted["profit_amount"],
+            amount_usd=quoted["amount_usd"],
+            amount=quoted["amount"],
+            currency=quoted["currency"],
+            gross_currency=quoted["gross_currency"],
+            net_currency=quoted["net_currency"],
+            gross_rub=quoted["gross_rub"],
+            net_rub=quoted["net_rub"],
+            fx_rate_id=quoted["fx_rate_id"],
             pipeline_version_id=binding.published_pipeline_version_id if binding else None,
         )
         session.add(order)
@@ -645,8 +728,7 @@ async def handle_digiseller_supplier(payload: dict[str, Any]) -> dict[str, Any]:
             provider="digiseller", provider_order_id=str(inv), item_id=int(item_id), payload=payload,
             normalized_status="paid", invoice_id=str(inv), options=payload.get("options") or [],
             email=payload.get("email") or payload.get("buyer_email"), buyer_id=payload.get("buyer_id"),
-            chat_id=str(inv), gross_amount=payload.get("amount"), currency=payload.get("type_curr"),
-            amount_usd=payload.get("amount_usd"),
+            chat_id=str(inv), **digiseller.money_fields(payload),
         )
     except IntegrityError:
         # A concurrent webhook won the unique (provider, inv) insert. Read its
